@@ -1,0 +1,36 @@
+---
+title: "Interesting Forecasting Applications with R"
+author: "Alp Serdaroglu - IE360 - Spring 2021"
+output:
+  html_document:
+    df_print: paged
+---
+```{r,echo=FALSE,results="hide"}
+library(knitr)
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+```{r,echo=FALSE,eval=FALSE}
+rmarkdown::render("C:/Users/alpsr/Desktop/IE360_Spring21_Homework0.Rmd",output_format="pdf_document")
+rmarkdown::render("C:/Users/alpsr/Desktop/IE360_Spring21_Homework0.Rmd",output_format="html_document")
+```
+
+1. [Time series forecasting using ARIMA models](https://blogs.oracle.com/datascience/introduction-to-forecasting-with-arima-in-r)
+
+    This example is important because it introduces the forecasting methodology using ARIMA models in R. The steps are to examine the data, to decompose the data, to check for stationarity, to check for auto correlations and to choose model order, to fit the ARIMA model, and to evaluate. 
+
+2. [Time-Series Forecasting: Predicting Stock Prices Using Facebook's Prophet Model](https://towardsdatascience.com/time-series-forecasting-predicting-stock-prices-using-facebooks-prophet-model-9ee1657132b5)
+
+    An example of forecasting applications in the are of finance. Aim is to forecast stock prices using a time-serie model developed by Facebook.
+    
+3. [Introduction to Time Series Analysis with R](https://towardsdatascience.com/introduction-to-time-series-analysis-with-r-a2f97650baa3)
+
+    An application of time series analysis using R aiming to forecast the CPI of Indonesia using 18 years of financial data.
+
+4. [Forecasting Sports Popularity: Application of Time Series Analysis](https://www.richtmann.org/journal/index.php/ajis/article/view/9982)
+
+    This example is trying to forecast the popularity of different sports league based in the USA with respect to trends in the Google searches.
+
+5. [Income Forecasting with Time Series Analyses](https://www.askyourdata.co/blog/income-forecasting-with-time-series-analyses)
+
+    In this example, author aims to forecast the income from a fundraising activity based on three years of historical data.

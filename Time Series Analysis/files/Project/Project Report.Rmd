@@ -1,0 +1,2434 @@
+---
+title: "Project Final Report"
+author: "Alp Serdaroğlu - Irmak Dai - Simay Gökalp"
+date: "7/1/2021"
+output: 
+  html_document:
+          toc: true
+          toc_depth: 3
+          toc_float: true
+          number_sections: true
+          code_folding: hide
+          theme: spacelab
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+require(jsonlite)
+require(httr)
+require(data.table)
+library(tidyverse)
+library(urca)
+library(forecast)
+library(GGally)
+library(lubridate)
+library(data.table)
+library(ggplot2)
+library(skimr)
+library(ggcorrplot)
+library(forecast)
+library(lubridate)
+library(urca)
+Sys.setlocale("LC_TIME", "English")
+```
+
+# Introduction
+
+On Trendyol, there are lots of products sold every day. To estimate the selling amount of the products will benefit companies to control the inventory, pricing and listing strategies, and more. In our project, we will try to estimate nine products from Trendyol starting from  June 11, 2021, until June 25, 2021. These products are from various categories and examined individually in our project.
+
+To make our prediction, we need to provide the next day's estimation using the data from a day before. That means that every day, we made predictions for two days later. New data points were adding to the system. We were updating the models before the submissions of each data every day.
+
+In the given data starting from 25.05.2020, the provided statistics are average price of the sold products, number of items sold, number of visits, the added count of the product to favorites and basket, number of items sold in that category, and the brandâs particular category, number of visits of the category, and visits on the Trendyol website. Some of these variables were not accurate, for example, visit on the Website and this data is not used in the data analysis. The data was provided daily however, there are omitted variables on certain days which also taken into consideration while analyzing.
+
+To improve our submissions, we examine Trendyol Website every day to understand the positioning, the price, campaigns, and competitors of each product. We adjusted the predictions of the models considering all other factors that can be found on the Website apart from the dataset. We take into consideration the stock out cases and prices of products from varying sellers.
+
+To make the predictions, we build our models using Auto-Regressive Integrated Moving Average(ARIMA), Auto-Regressive Integrated Moving Average with Exogeneous Input (ARIMAX), and Dynamic Regression methods. We also use the naive estimations for comparative reasons. Our predictions are obtained by combining the well-performing methods by using weighted averages considering our observations from Trendyol Website.
+
+Our rankings were evaluated according to WMAPE (Weighted Mean Absolute Percentage Error) value. This method balances the error giving a higher weight to the products that sell more. 
+
+In our testing phase, in order to compare the models, we made our predictions with two days difference between the train and test data as in the actual case and use the WMAPE for comparison.
+
+# Related Literature
+
+E-commerce industry is becoming more popular every day. Prediction of sales volume of products is important for many reasons; such as stock management and revenue forecasting. Time series analysis and regression approaches can be used while predicting the sales of the products. There are several studies in this area. In a study, on women's clothing sales volume of Taobao is predicted by combining web search data and structure time series model and resulted in a 4.84% MAPE of 7-days sales volume [1]. Also, various machine learning can be used to predict sales in e-commerce [2]. In addition, there are studies that compare different models in terms of performance, for example in a study [3], ARIMA, nonlinear autoregressive neural network (NARNN), and ARIMA-NARNN are compared.
+
+# Approach
+
+Series of different products have different needs. Since we are predicting the next day given the data up to yesterday, we avoided using predictors such as `favored_count` or `category_sold`. Because if we used them, we would also have to forecast them, or simply use the latest value, or lagged values, which is not so favorable. Instead, we used `price` as a predictor, because it is an attribute that we can check from the website whenever we want; actually price is a predictor that helps us follow the data from one day ahead, instead of two days ahead. 
+
+Our main approach was to plot the `sold_count` over time, check the correlation between prices and sales, check the acf and pacf plots, build suitable models, and take the averages of forecasts of model and revise them if necessary. 
+
+## Xiaomi
+
+```{r message=FALSE, warning=FALSE}
+load("C:/Users/alpsr/Desktop/Project/Project Final/xiaomi_environment.RData")
+```
+
+The first product to be forecasted is the bluetooth headphones of Xiaomi. It is one of the highest selling products compared to other products considered in this project. Its price changes frequently and discounts have a significant effect on its sales.
+
+### Descriptive Analysis
+```{r}
+# ggplot(xiaomi) +
+#   geom_boxplot(aes(y = sold_count))
+ggplot(xiaomi, aes(x = event_date)) +
+  geom_line(aes(y = sold_count))
+```
+
+Time series of the product sales fluctuates significantly. This also confirms that the sales volume is highly dependent to the price of the product.Also, the variance of the series seems to be constant.
+
+```{r message=FALSE}
+ggplot(xiaomi) +
+  geom_histogram(aes(x = sold_count))
+```
+
+Histogram of the sales data shows that the distribution of sales is close to the normal distribution. However, the distribution is right-skewed (distribution has a long right-tail) meaning that there are some days with very high sales volume relative to the mean of the distribution.
+
+```{r}
+acf(xiaomi$sold_count, lag.max = 40) #Autoregressive signature sinusodial/ expo decreasing --> maybe seasonality
+pacf(xiaomi$sold_count, lag.max = 40)
+```
+
+The sales data has very high autocorrelations up to lag 9. After that point, autocorrelation increases around lag 30 which suggests a monthly seasonality. In the partial autocorrelation plot, we see that there is a spike in every eight to 9 days.
+
+### Alternative Models
+
+#### Dynamic Regression
+
+```{r message=FALSE, warning=FALSE}
+ggpairs(xiaomi[,c(4,17:21)]) # visit count lag, price, basket lag, cat sold lag, favored_count lag, cat favored lag
+
+# summary(m11)
+# AIC(m11)
+```
+
+In the dynamic regression approach, all variables except price are used with lag 2 as we only have access data from two days before. Price data from the previous day is available. As it can be from the plot above, all variables are correlated to a some degree with the sales data to some degree and can be used in the linear regression. The first linear regression model considered included trend, month and day of the week variables and its results were as follows.
+
+```{r message=FALSE, warning=FALSE}
+summary(m12)
+AIC(m12)
+```
+
+In the second model, external regressors are added to the linear regression model. These variables include basket count, category sold, category visits, and category favored with lag 2. Also, price variable is included with lag 2. Thus, model improved as AIC and adjusted R-squared improved as it can be seen below. Note that several other linear regression models are also considered but not included in this report.
+
+```{r message=FALSE, warning=FALSE} 
+summary(m14c)
+AIC(m14c)
+```
+
+After, constructing the linear regression model above, an ARIMA model is used to model its residuals. First, residuals are checked for stationarity. Result of the KPSS unit root test shows that the residuals are stationary. According to the ACF and PACF plots of the residuals is given below. ACF is sinusodial and PACF spikes at lag 1 then decreases considerably. Thus, we can say that the residuals display an autoregressive behavior. Many alternative parameters are considered for the ARIMA model and two alternatives are chosen.
+
+```{r}
+# ARIMA on residuals
+summary(ur.kpss(random1, use.lag = 30))
+tsdisplay(random1)
+```
+
+Finally, a third model is constructed which does not include the category visits and category favored as regressors since their autocorrelations are relatively low.
+
+```{r message=FALSE, warning=FALSE} 
+summary(m14b)
+AIC(m14b)
+```
+
+Also, as it can be seen below, residuals of the linear model is stationary.
+
+```{r message=FALSE, warning=FALSE}
+# ARIMA on residuals
+summary(ur.kpss(random2, use.lag = 30))
+tsdisplay(random2)
+```
+
+##### Alternative 1
+
+Results of the first alternative can be seen below. It included one autoregressive and one moving average term.
+
+```{r message=FALSE, warning=FALSE} 
+summary(d18)
+checkresiduals(d18)
+```
+
+As it can be seen above, residuals of the ARIMA model seems to satisfy the model assumptions. Error terms are distributed normally with zero mean and constant variance. Also, autocorrelations of the error terms are mostly insignificant. 
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(xiaomi$sold_count-xiaomi$Model1Fitted))
+ggplot(xiaomi, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model1Fitted, color = "fitted"))
+```
+
+Finally, the linear regression and arima model is combined. Analysis of the residuals and fitted values can be seen above. The autocorrelation of the errors are not significant and errors are distributed with zero mean and constant variance which satisfies the assumptions.
+
+##### Alternative 2
+
+For the second alternative, version of the linear regression which does not include category visits and category favored as regressors. Arima model for the residuals included three autoregressive and three moving average terms. Results of the arima model can be seen below. 
+
+```{r message=FALSE, warning=FALSE}
+summary(e115)
+checkresiduals(e115)
+```
+
+As it can be seen above, residuals of the ARIMA model seems to satisfy the model assumptions. Error terms are distributed normally with zero mean and constant variance. Also, autocorrelations of the error terms are mostly insignificant. However, at lag 27 and 35 autocorrelations become significant but they stay relatively low.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(xiaomi$sold_count-xiaomi$Model2Fitted))
+ggplot(xiaomi, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model2Fitted, color = "fitted"))
+```
+
+Finally, the linear regression and arima model is combined. Analysis of the residuals and fitted values can be seen above. The autocorrelation of the errors are not significant and errors are distributed with zero mean and constant variance which satisfies the assumptions.
+
+#### ARIMA Model
+
+##### Alternative 3
+
+In the second approach, an arima model is constructed directly from the sales data using the auto.arima function. As the series is not stationary, the first difference is taken. In the resulting model, one moving average and three autoregressive terms are included. Summary output of the model can be seen below.
+
+```{r message=FALSE, warning=FALSE}
+summary(xiaomi_sarima)
+checkresiduals(xiaomi_sarima)
+```
+
+As it can be seen above, residuals of the ARIMA model seems to satisfy the model assumptions. Error terms are distributed normally with zero mean and constant variance. Also, autocorrelations of the error terms are mostly insignificant.There is a slighly higher autocorrelation at lag 7. In the plot below you can see the fitted and real values of the sales data.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(xiaomi, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model3Fitted, color = "fitted"))
+```
+
+#### Decomposition
+
+##### Alternative 4
+
+In the final approach, the sales data is decomposed using classical decomposition. Then, an arima model is fitted to the random component. The frequency of the series is chosen to be 28 since autocorrelation has the highest value at lag 28. To generate a prediction for the seasonal component, last available seasonal component is used. For the trend component, Holt's method is used to generate forecasts.
+
+```{r message=FALSE, warning=FALSE}
+plot(xiaomi_ts_dec)
+```
+
+When we analyze the decomposition plot, we see that the random component resembles a stationarity data with mean zero and constant variance. Also, trend component does not have any seasonality which suggests that most of the seasonal effects are being accounted for.
+
+```{r message=FALSE, warning=FALSE}
+summary(r113)
+checkresiduals(r113)
+```
+
+The arima model fitted for the random component has two autoregressive and one moving average components. Before selecting the best model, several parameters are considered through a systematic search. The best model is chosen according to the AIC values. Residuals of the arima model seems to satisfy the model assumptions. There is only a slightly high autocorrelation at lag 35.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(xiaomi$sold_count-xiaomi$Model4Fitted))
+ggplot(xiaomi, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model4Fitted, color = "fitted"))
+```
+
+Finally, trend, seasonal and forecasted random components are combined to generate the fitted data. The comparison of the fitted and real data can be seen above.
+
+### Model Evaluation
+
+```{r}
+eval
+```
+
+Finally, models are tested between 28 May 2021 and 11 May 2021. Prediction are made for the day after tomorrow. The results of the tests are summarized in the above table along with the Naive forecasts. Alternative 3 is the only model that generates better results than the Naive forecasts. Also, Alternative 2 is very close to the Naive forecast.
+
+To generate forecasts for this project, predictions of the Alternative 2 and Alternative 3 are considered.
+
+## Fakir
+
+The second product to be forecasted is the bluetooth headphones of Fakir. It is one of the lowest selling products compared to other products considered in this project. It has a relatively stable price.
+
+```{r}
+rm(list = ls())
+load("C:/Users/alpsr/Desktop/Project/Project Final/Fakir_environment.RData")
+```
+
+### Descriptive Analysis
+
+Time series of the product sales fluctuates significantly. The series both has trend and seasonal components. Also, the variance of the series seems to be constant although there are some occasional extreme observations.
+
+```{r}
+# ggplot(fakir) +
+#   geom_boxplot(aes(y = sold_count))
+ggplot(fakir, aes(x = event_date)) +
+  geom_line(aes(y = sold_count))
+```
+
+Histogram of the sales data shows that the distribution is close to normal. However, there are some deviations from the normal distribution such as the long right tail of the distribution.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(fakir) +
+  geom_histogram(aes(x = sold_count))
+```
+
+Autocorrelation and partial autocorrelation plots of the sales data is shown below. Decreasing autocorrelation suggest that there is a trend in the data. Also, partial autocorrelations becomes insignificant after lag 2 which suggests an autoregressive behavior.
+
+```{r message=FALSE, warning=FALSE}
+acf(fakir$sold_count, lag.max = 40) 
+pacf(fakir$sold_count, lag.max = 40)
+```
+
+### Alternative Models
+
+#### Dynamic Regression
+
+```{r message=FALSE, warning=FALSE}
+ggpairs(fakir[,c(4,17:21)]) # visit count lag, price, basket lag, cat sold lag, favored_count lag, cat favored lag
+```
+
+In the dynamic regression approach, all variables except price are used with lag 2 as we only have access data from two days before. Price data from the previous day is available. As it can be from the plot above, all variables are correlated with the sales data to some degree and can be used in the linear regression. The first linear regression model considered included trend, month and day of the week variables and its results were as follows.
+
+```{r message=FALSE, warning=FALSE}
+summary(m11)
+AIC(m11)
+```
+
+Before using the residuals of this model in the arima models we need to check whether it is stationary. Result of the unit-root test show that the residuals are stationary.
+
+```{r}
+summary(ur.kpss(random1, use.lag = 32))
+tsdisplay(random1)
+```
+
+In the second alternative, day of the week variables is added to the model. The model does not improve both AIC and adjusted R-squared values decrease.
+
+```{r message=FALSE, warning=FALSE}
+summary(m12)
+AIC(m12)
+```
+
+Finally, a linear regression model with external regressors along with time series variables are considered. This models has a better AIC and adjusted R-squared values.
+
+```{r message=FALSE, warning=FALSE}
+summary(m14c)
+AIC(m14c)
+```
+
+Before using the residuals of this model in the arima models we need to check whether it is stationary. Result of the unit-root test show that the residuals are stationary.
+
+```{r message=FALSE, warning=FALSE}
+summary(ur.kpss(random2, use.lag = 30))
+tsdisplay(random2)
+```
+
+##### Alternative 1
+
+Results of the first alternative can be seen below. Linear regression with external variables is used in this model. Several alternatives are considered for the arima parameters. The best arima model on residuals have one autoregressive component.
+
+```{r message=FALSE, warning=FALSE}
+summary(d27)
+checkresiduals(d27)
+```
+
+As it can be seen above, residuals of the arima model seems to satisfy the model assumptions.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(fakir$sold_count-fakir$Model1Fitted))
+
+ggplot(fakir, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model1Fitted, color = "fitted"))
+```
+
+Finally, the linear regression and arima model is combined. Analysis of the residuals and fitted values can be seen above. The autocorrelation of the errors are not significant and errors are distributed with zero mean and constant variance  which satisfies the assumptions.
+
+##### Alternative 2
+
+In the second alternative, linear regression with trend and month variables is used in the model. Then, an arima model is fitted to the residuals. The arima model choosen has one autoregressive and one moving average terms and its results are as follows.
+
+```{r}
+# ARIMA on residuals
+summary(e110)
+checkresiduals(e110)
+```
+
+As it can be seen above, model assumptions for the arima model are satisfied. There is only a slightly significant autocorrelation at lag 20.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(fakir$sold_count-fakir$Model2Fitted))
+ggplot(fakir, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model2Fitted, color = "fitted"))
+```
+
+Finally, the linear regression and arima model is combined. Analysis of the residuals and fitted values can be seen above. The autocorrelation of the errors are not significant and errors are distributed with zero mean and constant variance  which satisfies the assumptions.
+
+##### Alternative 3
+
+In the second alternative, linear regression with trend and month variables is used in the model. Then, an arima model is fitted to the residuals. The arima model is choosen with autoarima function which suggested a sarima model with one autoregressive, one moving average and two seasonal autoregressive terms. The results of the arima models are as follows.
+
+```{r}
+summary(autoarima2)
+checkresiduals(autoarima2)
+```
+
+As it can be seen above, model assumptions for the sarima model are satisfied. There is only a slightly significant autocorrelation at lag 20.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(fakir$sold_count-fakir$Model3Fitted))
+ggplot(fakir, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model2Fitted, color = "fitted"))
+```
+
+Finally, the linear regression and arima model is combined. Analysis of the residuals and fitted values can be seen above. The autocorrelation of the errors are not significant and errors are distributed with zero mean which satisfies the assumptions
+
+#### SARIMA
+
+##### Alternative 4
+
+In the second approach, a sarima model is constructed directly from the sales data using the auto.arima function. As the series is not stationary, the first difference is taken. In the resulting model, one moving average, one autoregressive term and two seasonal autoregressive terms are included. Summary output of the model can be seen below.
+
+```{r message=FALSE, warning=FALSE}
+summary(fakir_sarima)
+
+checkresiduals(fakir_sarima)
+```
+
+As it can be seen above, residuals of the ARIMA model seems to satisfy the model assumptions. Error terms are approximately distributed normally with zero mean and constant variance. Also, autocorrelations of the error terms are insignificant. In the plot below you can see the fitted and real values of the sales data.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(fakir, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model4Fitted, color = "fitted"))
+```
+
+##### Alternative 5
+
+In this alternative an arima model is constructed directly from the sales data using the auto.arima function. No seasonal terms are used. As the series is not stationary, the first difference is taken. In the resulting model, three moving average terms are included. Summary output of the model can be seen below.
+
+```{r message=FALSE, warning=FALSE}
+summary(fakir_sarima2)
+checkresiduals(fakir_sarima2)
+```
+
+As it can be seen above, residuals of the ARIMA model seems to satisfy the model assumptions. Error terms are approximately distributed normally with zero mean and constant variance. Also, autocorrelations of the error terms are insignificant. In the plot below you can see the fitted and real values of the sales data.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(fakir_sarima2$residuals)
+ggplot(fakir, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model5Fitted, color = "fitted"))
+```
+
+### Model Evaluation
+
+```{r}
+eval
+```
+
+Finally, models are tested between 28 May 2021 and 11 May 2021. Prediction are made for the day after tomorrow. The results of the tests are summarized in the above table along with the Naive forecasts. Alternatives 2, 3, 4 and 5 generate better results than the Naive forecasts. their results are very close to each other. Thus, to generate forecasts for this project, predictions of these alternatives are considered.
+
+## Altınyıldız
+
+The third product to be forecasted is a male jacket of brand Altınyıldız. It is the lowest selling product compared to other products. In the current its sales are very low and Its price is mostly stable. Also, during the forecasting phase, Father's Day played a role in its sales.
+
+```{r}
+rm(list = ls())
+load("C:/Users/alpsr/Desktop/Project/Project Final/mont_environment.RData")
+```
+
+### Descriptive Analysis
+```{r message=FALSE, warning=FALSE}
+ggplot(mont, aes(x = event_date)) +
+  geom_line(aes(y = sold_count))
+```
+
+Time series for the sales of this product show that for the majority of the period considered, sales of this product equals to zero. Also, during these days, price data of the product is also not available.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(mont) +
+  geom_histogram(aes(x = sold_count))
+```
+
+Histogram of the sales data does not show a normal distribution. It shows that for most of the days sales are equal or close to zero. Having such a time series data made the forecasting a harder task as the data had limited trend and seasonality.
+
+### Alternative Models
+
+#### Dynamic Regression
+
+```{r message=FALSE, warning=FALSE}
+ggpairs(mont[,c(4,17:21)])
+```
+
+
+In the dynamic regression approach, all variables whose data is not dirty except price are used with lag 2 as we only have access data from two days before. Price data from the previous day is available. Only basket count has a significant correlation with the sales. The first linear regression model considered included month and day of the week variables and its results were as follows.
+
+```{r message=FALSE, warning=FALSE}
+summary(m11)
+AIC(m11)
+```
+
+The second linear regression model considered included, trend, month and day of the week variables. Its adjusted R-squared value slightly improved but AIC value decreased. We have not considered any additional variables because the data is either not siginificant or missing.
+
+```{r message=FALSE, warning=FALSE}
+summary(m12)
+AIC(m12)
+```
+
+##### Alternative 1
+
+In the first alternative we have considered the first linear regression model without any arima on its residuals. Its residuals does not seem to satisfy the model assumptions. First, it has a high autocorrelation at lag 1. Also, residuals fluctuate greatly and do not have a constant variance.
+
+```{r}
+checkresiduals(m11)
+ggplot(mont, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model1Fitted, color = "fitted"))
+```
+
+##### Alternative 2
+
+Before constructing an arima model on the residuals of the first linear regression model, its stationarity is checked. Results of the unit root test show that the residuals are stationary.
+
+```{r message=FALSE, warning=FALSE}
+# ARIMA on residuals
+summary(ur.kpss(random1, use.lag = 30))
+```
+
+After trying different alternatives for the arima model, an arima model with one autoregressive and two moving average terms is chosen. Its summary is as follows.
+
+```{r message=FALSE, warning=FALSE}
+summary(d36)
+checkresiduals(d36)
+```
+
+Residuals does not seem to satisfy the model assumptions. The model is unable to detect the extreme observations.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(mont$sold_count-mont$Model2Fitted))
+ggplot(mont, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model2Fitted, color = "fitted"))
+```
+
+Finally, the linear regression and arima model is combined. Analysis of the residuals and fitted values can be seen above. The autocorrelation of the errors are not highly significant.
+
+##### Alternative 3
+
+A second arima model is fitted to the resiudals of the first linear regression. It only has one moving average term.
+
+```{r message=FALSE, warning=FALSE}
+summary(autoarima1)
+checkresiduals(autoarima1)
+```
+
+The model is still unable to detect the extreme observations.
+
+```{r message=FALSE, warning=FALSE}
+tsdisplay(ts(mont$sold_count-mont$Model3Fitted))
+ggplot(mont, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model3Fitted, color = "fitted"))
+```
+
+Finally, the linear regression and arima model is combined. Analysis of the residuals and fitted values can be seen above. The autocorrelation of the errors are not highly significant.
+
+#### SARIMAX Model
+
+##### Alternative 4
+
+In this approach a SARIMAX model is constructed using the autoarima function which includes basket count and category sold with lag 2 as external regressors. The resulting model included 2 autoregressive and 2 moving average terms. The summary of the model can be seen below. 
+
+```{r message=FALSE, warning=FALSE}
+summary(mont_sarimax) # regressoes basekt count and category sold
+```
+
+Model assumptions about the residuals are not satisfied. The residuals are not distributed normally ant the model is unable to predict extreme observations accurately.
+
+```{r message=FALSE, warning=FALSE}
+checkresiduals(mont_sarimax)
+```
+
+Below, you can see the comparison of fitted and real values of the sales data.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(mont, aes(x = event_date))+
+  geom_line(aes(y = sold_count, color = "sold_count"))+
+  geom_line(aes(y = Model4Fitted, color = "fitted"))
+```
+
+### Model Evaluation
+
+```{r}
+eval
+rm(list = ls())
+```
+
+Finally, models are tested between 28 May 2021 and 11 May 2021. Prediction are made for the day after tomorrow. The results of the tests are summarized in the above table along with the Naive forecasts. All models are better than the Naive forecasts. Alternatives 1 and 3 are the best performing models.
+
+To generate forecasts for this project, predictions of the Alternative 2 and Alternative 3 are considered.
+
+```{r, include=FALSE}
+get_token <- function(username, password, url_site){
+  
+  post_body = list(username=username,password=password)
+  post_url_string = paste0(url_site,'/token/')
+  result = POST(post_url_string, body = post_body)
+  
+  # error handling (wrong credentials)
+  if(result$status_code==400){
+    print('Check your credentials')
+    return(0)
+  }
+  else if (result$status_code==201){
+    output = content(result)
+    token = output$key
+  }
+  
+  return(token)
+}
+
+get_data <- function(start_date='2020-03-20', token, url_site){
+  
+  post_body = list(start_date=start_date,username=username,password=password)
+  post_url_string = paste0(url_site,'/dataset/')
+  
+  header = add_headers(c(Authorization=paste('Token',token,sep=' ')))
+  result = GET(post_url_string, header, body = post_body)
+  output = content(result)
+  data = data.table::rbindlist(output)
+  data[,event_date:=as.Date(event_date)]
+  data = data[order(product_content_id,event_date)]
+  return(data)
+}
+
+
+send_submission <- function(predictions, token, url_site, submit_now=F){
+  
+  format_check=check_format(predictions)
+  if(!format_check){
+    return(FALSE)
+  }
+  
+  post_string="list("
+  for(i in 1:nrow(predictions)){
+    post_string=sprintf("%s'%s'=%s",post_string,predictions$product_content_id[i],predictions$forecast[i])
+    if(i<nrow(predictions)){
+      post_string=sprintf("%s,",post_string)
+    } else {
+      post_string=sprintf("%s)",post_string)
+    }
+  }
+  
+  submission = eval(parse(text=post_string))
+  json_body = jsonlite::toJSON(submission, auto_unbox = TRUE)
+  submission=list(submission=json_body)
+  
+  print(submission)
+  # {"31515569":2.4,"32737302":2.4,"32939029":2.4,"4066298":2.4,"48740784":2.4,"6676673":2.4, "7061886":2.4, "73318567":2.4, "85004":2.4} 
+  
+  if(!submit_now){
+    print("You did not submit.")
+    return(FALSE)      
+  }
+  
+  
+  header = add_headers(c(Authorization=paste('Token',token,sep=' ')))
+  post_url_string = paste0(url_site,'/submission/')
+  result = POST(post_url_string, header, body=submission)
+  
+  if (result$status_code==201){
+    print("Successfully submitted. Below you can see the details of your submission")
+  } else {
+    print("Could not submit. Please check the error message below, contact the assistant if needed.")
+  }
+  
+  print(content(result))
+  
+}
+
+check_format <- function(predictions){
+  
+  if(is.data.frame(predictions) | is.data.frame(predictions)){
+    if(all(c('product_content_id','forecast') %in% names(predictions))){
+      if(is.numeric(predictions$forecast)){
+        print("Format OK")
+        return(TRUE)
+      } else {
+        print("forecast information is not numeric")
+        return(FALSE)                
+      }
+    } else {
+      print("Wrong column names. Please provide 'product_content_id' and 'forecast' columns")
+      return(FALSE)
+    }
+    
+  } else {
+    print("Wrong format. Please provide data.frame or data.table object")
+    return(FALSE)
+  }
+  
+}
+
+# this part is main code
+subm_url = 'http://46.101.163.177'
+
+u_name = "Group8"
+p_word = "aBbYZj795YeGEupS"
+submit_now = FALSE
+
+username = u_name
+password = p_word
+
+##----
+
+token = get_token(username=u_name, password=p_word, url=subm_url)
+
+accu=function(actual,forecast){
+  n=length(actual)
+  error=actual-forecast
+  mean=mean(actual)
+  sd=sd(actual)
+  CV=sd/mean
+  FBias=sum(error)/sum(actual)
+  MAPE=sum(abs(error/actual))/n
+  RMSE=sqrt(sum(error^2)/n)
+  MAD=sum(abs(error))/n
+  MADP=sum(abs(error))/sum(abs(actual))
+  WMAPE = sum((abs(error)/actual)*actual)/sum(actual)
+  #WMAPE=MAD/mean
+  l=data.frame(n,mean,sd,CV,FBias,MAPE,RMSE,MAD,MADP,WMAPE)
+  return(l)
+}
+
+```
+```{r}
+data = get_data(token=token,url=subm_url)
+
+rawdata <- read.csv("C:/Users/alpsr/Desktop/Project/Project Final/ProjectRawData.csv")
+
+rawdata <- na.omit(rawdata,event_date)
+
+fetched_data_filtered <- data %>%
+  mutate(event_date=as.Date(event_date)) %>% 
+  filter(event_date>"2021-05-31") %>%
+  select(colnames(rawdata)) %>%
+  arrange(event_date)
+
+updated_data <- rbind.data.frame(fetched_data_filtered,rawdata)
+
+updated_data <- updated_data %>%
+  filter(event_date<="2021-06-11") # we selected "2021-05-28"-"2021-06-11" as our test period
+```
+
+## Oral B - Sarj Edilebilir Dis Fircasi
+
+
+```{r}
+dis_fircasi <- updated_data %>%
+  mutate(event_date=as.Date(event_date)) %>%
+  arrange(event_date) %>%
+  filter(product_content_id==32939029) 
+
+```
+
+```{r}
+ggplot(dis_fircasi, aes(x=event_date))+
+  geom_line(aes(y=sold_count)) +
+  labs(title="Sales of Oral B over time")
+
+```
+
+Variance change over time, and there are periods when variance is higher than the general habit of the data. So I decided to take the logarithm of the `sold_count` and use it while building models. 
+
+```{r, warning=FALSE}
+dis_fircasi[,log_sold:=log(sold_count)]
+```
+
+```{r}
+acf(dis_fircasi$sold_count, na.action = na.pass)
+pacf(dis_fircasi$sold_count, na.action = na.pass)
+
+```
+
+
+We see a relatively higher correlation in lag 7, which indicates weekly seasonality.  
+
+While making predictions, we checked the price of products on the website, in order to have a more up to date information. 
+
+
+
+```{r, warning=FALSE}
+ggplot(dis_fircasi, aes(x=event_date))+
+  geom_line(aes(y=log_sold))+
+  labs(title="log(Sales) of Oral B over time")
+w <- which(dis_fircasi$log_sold==0)
+dis_fircasi$log_sold[w] <- mean(c(dis_fircasi$log_sold[31],dis_fircasi$log_sold[34]))
+```
+
+```{r}
+plot(dis_fircasi$price,dis_fircasi$log_sold)
+```
+
+Although we do not see a clear negative correlation, we can say that if price of the toothbrush affects the sales: If price is below its general level, sales increase. I decided the use the price as regressor because we have the opportunity to check price from the website. It is kind of problematic to use other variables in the dataset as regressors because we would have to forecast also the variable, or use lagged values, which may decrease the performance of our model. 
+
+
+### Model 1 - Time Series Decomposition & ARIMA on Random Component
+
+In the acf plot, there is autocorrelation in lag 7. So I decided that time series decomposition might be suitable for this series. 
+
+
+The code to test our model:
+
+```{r, warning=FALSE}
+test_dates <- c(as.Date("2021-05-28"):as.Date("2021-06-11")) #Update here
+for(i in 1:length(test_dates)){
+  
+  current_date=test_dates[i]-2
+  
+  past_data <- dis_fircasi[event_date<=current_date,]
+  
+  dis_fircasi_ts <- ts(past_data$log_sold, frequency = 7)  
+  dis_fircasi_decomposed <- decompose(dis_fircasi_ts, type="additive")
+  model <- arima(dis_fircasi_decomposed$random,order = c(2,1,2),seasonal = list(order=c(1,0,0)),xreg = past_data$price)
+  forecasted=predict(model,n.ahead = 2,newxreg = dis_fircasi[event_date==test_dates[i],price])
+  dis_fircasi[nrow(dis_fircasi)-length(test_dates)+i, Model1 := forecasted$pred[2]+dis_fircasi_decomposed$seasonal[(nrow(dis_fircasi)-length(test_dates)+i)%%7+7]+dis_fircasi_decomposed$trend[max(which(!is.na(dis_fircasi_decomposed$trend)))]]
+}
+m<-accu(dis_fircasi$sold_count[(nrow(dis_fircasi)+1-length(test_dates)):(nrow(dis_fircasi))],exp(dis_fircasi$Model1[(nrow(dis_fircasi)+1-length(test_dates)):(nrow(dis_fircasi))]))
+
+ 
+```
+
+### Model 2 - Time Series Decomposition & ARIMA on Random Component
+
+
+The code to test the model: 
+
+```{r}
+for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- dis_fircasi[event_date<=current_date,]
+    
+    dis_fircasi_ts <- ts(past_data$log_sold, frequency = 7)  
+    dis_fircasi_decomposed <- decompose(dis_fircasi_ts, type="additive")
+    model <- arima(dis_fircasi_decomposed$random,order = c(1,0,0),seasonal = list(order=c(1,0,0)),xreg = past_data$price)
+    forecasted=predict(model,n.ahead = 2,newxreg = dis_fircasi[event_date==test_dates[i],price])
+    dis_fircasi[nrow(dis_fircasi)-length(test_dates)+i, Model2 := forecasted$pred[2]+dis_fircasi_decomposed$seasonal[(nrow(dis_fircasi)-length(test_dates)+i)%%7+7]+dis_fircasi_decomposed$trend[max(which(!is.na(dis_fircasi_decomposed$trend)))]]
+  }
+  m2<-accu(dis_fircasi$sold_count[(nrow(dis_fircasi)+1-length(test_dates)):(nrow(dis_fircasi))],exp(dis_fircasi$Model2[(nrow(dis_fircasi)+1-length(test_dates)):(nrow(dis_fircasi))]))  
+ 
+
+```
+  
+```{r}
+dis_fircasi[,pred1:=exp(Model1)]
+dis_fircasi[,pred2:=exp(Model2)]
+  
+```
+
+
+
+## Sleepy Bebek Islak Mendil
+
+```{r}
+bebek_mendil <- updated_data %>%
+  mutate(event_date=as.Date(event_date)) %>%
+  arrange(event_date) %>%
+  filter(product_content_id==4066298)
+
+```
+
+```{r}
+ggplot(bebek_mendil, aes(x=event_date))+
+  geom_line(aes(y=sold_count))+
+  labs(title="Sales of Sleepy over time")
+
+```
+
+Variance increase over time, again I will take the logarithm of the `sold_count`.
+
+```{r}
+acf(bebek_mendil$sold_count, na.action = na.pass)
+pacf(bebek_mendil$sold_count, na.action = na.pass)
+```
+
+There is not any significant seasonality. Autoregressive models may be used. 
+
+
+```{r, warning=FALSE}
+bebek_mendil[,log_sold:=log(sold_count)]
+bebek_mendil[,lagged:=lag(log_sold)]
+bebek_mendil[,popular_period:=ifelse(ty_visits>130000000,1,0)] 
+ggplot(bebek_mendil, aes(x=event_date))+
+  geom_line(aes(y=log_sold))+
+  labs(title="log(Sales) of Sleepy over time")
+
+```
+We do not see a clear trend nor seasonality.
+
+```{r}
+bebek_mendil$log_sold %>%
+  ur.kpss() %>%
+  summary()
+```
+
+We have evidence against the stationarity of the data.
+
+```{r}
+plot(bebek_mendil$price,bebek_mendil$log_sold)
+```
+
+We see that price is negatively correlated with `log(sales)`. Regardless of the type of model we use, price should be a regressor. 
+
+### Model 1 - ARIMA with external regressors
+
+Although the data is not stationary, I thought that ARIMA with regressors would be a good model for this series. 
+
+
+Code to test the model:
+
+```{r}
+test_dates <- c(as.Date("2021-05-28"):as.Date("2021-06-11")) #Update here
+
+for(i in 1:length(test_dates)){
+  
+  current_date=test_dates[i]-2
+  
+  past_data <- bebek_mendil[event_date<=current_date,]
+  fitted_arima=arima(past_data$log_sold, xreg = past_data$price,order=c(0,1,5))
+  forecasted=predict(fitted_arima,newxreg = bebek_mendil[event_date==test_dates[i],price],n.ahead = 2)
+  bebek_mendil[nrow(bebek_mendil)-length(test_dates)+i, Model1 := forecasted$pred[2]]
+}
+
+s<-accu(bebek_mendil$sold_count[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))],exp(bebek_mendil$Model1[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))]))
+
+```
+
+
+### Model 2 - Linear regression & ARIMA on residuals
+
+I tried these linear regression models:
+
+```{r,eval=FALSE}
+lm(log_sold~lagged,bebek_mendil)
+lm(log_sold~lagged+price,bebek_mendil)
+lm(log_sold~lagged+price+ty_visits,bebek_mendil)
+lm(log_sold~lagged+price+ty_visits+as.factor(month(event_date)),bebek_mendil)
+lm(log_sold~lagged+price+ty_visits+as.factor(month(event_date))+as.factor(weekdays(event_date)))
+lm(log_sold~lagged+price+as.factor(month(event_date))+as.factor(weekdays(event_date)))
+```
+
+And decided to use this:
+
+```{r,eval=FALSE}
+lm(log_sold~lagged+price+as.factor(month(event_date))+as.factor(weekdays(event_date)))
+```
+
+
+Code to test model: 
+
+```{r}
+test_dates <- c(as.Date("2021-05-28"):as.Date("2021-06-11")) #Update here
+fmla <- "log_sold~lagged+price+as.factor(month(event_date))+as.factor(weekdays(event_date))"
+for(i in 1:length(test_dates)){
+  
+  current_date=test_dates[i]-2
+  
+  past_data <- bebek_mendil[event_date<=current_date,]
+  fitted_lm=lm(as.formula(fmla),past_data)
+  rm <- arima(fitted_lm$residual, order = c(1,0,0))
+  forecasted=predict(fitted_lm,bebek_mendil[event_date == test_dates[i],])
+  bebek_mendil[nrow(bebek_mendil)-length(test_dates)+i, Model2 := forecasted+forecast(rm,h=2)$mean[2]]
+}
+
+s2 <-accu(bebek_mendil$sold_count[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))],exp(bebek_mendil$Model2[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))])) 
+
+
+```
+
+### Model 3 - Linear regression & ARIMA on residuals
+
+After making predictions for a few days, we observed that our model does not capture the effect of the increased visits in popular periods of the website. So we added `popular_period` variable to temper the effect. 
+
+
+Code to test the model:
+
+```{r}
+fmla2 <- "log_sold~lagged+price+as.factor(month(event_date))+as.factor(weekdays(event_date))+as.factor(popular_period)"
+  for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- bebek_mendil[event_date<=current_date,]
+    fitted_lm=lm(as.formula(fmla2),past_data)
+    rm <- arima(fitted_lm$residual, order = c(1,0,0))
+    forecasted=predict(fitted_lm,bebek_mendil[event_date == test_dates[i],])
+    bebek_mendil[nrow(bebek_mendil)-length(test_dates)+i, Model3 := forecasted+forecast(rm,h=2)$mean[2]]
+  }
+  
+  s3 <-accu(bebek_mendil$sold_count[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))],exp(bebek_mendil$Model3[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))]))
+  
+```
+
+
+### Model 4 - ARIMA with external regressors
+
+
+Code to test the model:
+
+```{r}
+  for(i in 1:length(test_dates)){
+
+    current_date=test_dates[i]-2
+
+    past_data <- bebek_mendil[event_date<=current_date,]
+    fitted_arima=arima(past_data$log_sold, xreg = cbind(past_data$price,past_data$popular_period),order=c(0,1,5))
+    forecasted=predict(fitted_arima,newxreg = cbind(bebek_mendil[event_date==test_dates[i],price],bebek_mendil[event_date==test_dates[i],popular_period]),n.ahead = 2)
+    bebek_mendil[nrow(bebek_mendil)-length(test_dates)+i, Model4 := forecasted$pred[2]]
+  }
+
+    s4<-accu(bebek_mendil$sold_count[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))],exp(bebek_mendil$Model4[(nrow(bebek_mendil)+1-length(test_dates)):(nrow(bebek_mendil))]))
+
+    
+    
+```
+
+```{r}
+bebek_mendil[,pred1:=exp(Model1)]
+bebek_mendil[,pred2:=exp(Model2)]
+bebek_mendil[,pred3:=exp(Model3)]
+bebek_mendil[,pred4:=exp(Model4)]
+
+```
+
+
+## La Roche Posay Temizleme Jeli
+
+```{r}
+yuz_temizleyici <- updated_data %>%
+  mutate(event_date=as.Date(event_date)) %>%
+  arrange(event_date) %>%
+  filter(product_content_id==85004)
+```
+
+```{r}
+
+ggplot(yuz_temizleyici, aes(x=event_date))+
+  geom_line(aes(y=sold_count))+
+  labs(title="Sales of La Roche over time")
+```
+
+
+Again, we see periods that variance significantly increased. It is better to use logged values.
+
+```{r}
+acf(yuz_temizleyici$sold_count, na.action = na.pass)
+```
+
+
+Interestingly, we see a relatively high autocorrelation in lag 15. If we were to use time series decomposition, we may set the frequency as 15. 
+
+```{r, warning=FALSE}
+yuz_temizleyici[,log_sold:=log(sold_count)]
+```
+```{r}
+ggplot(yuz_temizleyici, aes(x=event_date))+
+  geom_line(aes(y=log_sold))+
+  labs(title="log(Sales) of La Roche over time")
+```
+
+### Model 1 - ARIMA with external regressors
+
+
+Code to test the model:
+```{r}
+test_dates <- c(as.Date("2021-05-28"):as.Date("2021-06-11"))
+
+
+for(i in 1:length(test_dates)){
+  
+  current_date=test_dates[i]-2
+  
+  past_data <- yuz_temizleyici[event_date<=current_date,]
+  fitted_arima=arima(past_data$log_sold, xreg = past_data$price,order=c(2,1,4))
+  forecasted=predict(fitted_arima,newxreg = yuz_temizleyici[event_date==test_dates[i],price],n.ahead = 2)
+  yuz_temizleyici[nrow(yuz_temizleyici)-length(test_dates)+i, Model1 := forecasted$pred[2]]
+} 
+
+t<-accu(yuz_temizleyici$sold_count[(nrow(yuz_temizleyici)+1-length(test_dates)):(nrow(yuz_temizleyici))],exp(yuz_temizleyici$Model1[(nrow(yuz_temizleyici)+1-length(test_dates)):(nrow(yuz_temizleyici))]))
+
+
+```
+
+### Model 2 - ARIMA with external regressors
+
+Differencing & arima
+
+Code to test model:
+
+```{r}
+for(i in 1:length(test_dates)){
+  
+  current_date=test_dates[i]-2
+  
+  past_data <- yuz_temizleyici[event_date<=current_date,]
+  fitted_arima=arima(diff(past_data$log_sold,15),order=c(1,0,0),seasonal = c(2,0,3)) 
+  forecasted=predict(fitted_arima,n.ahead = 2)
+  yuz_temizleyici[nrow(yuz_temizleyici)-length(test_dates)+i,Model2:=(yuz_temizleyici[nrow(yuz_temizleyici)-length(test_dates)+i-15,log_sold]+forecasted$pred[2])]
+}
+
+t2<-accu(yuz_temizleyici$sold_count[(nrow(yuz_temizleyici)+1-length(test_dates)):(nrow(yuz_temizleyici))],exp(yuz_temizleyici$Model2[(nrow(yuz_temizleyici)+1-length(test_dates)):(nrow(yuz_temizleyici))]))
+
+
+```
+
+### Model 3 - Time Series Decomposition & ARIMA on random component
+
+
+Code to test model:
+
+```{r, warning=FALSE}
+
+
+for(i in 1:length(test_dates)){
+  
+  current_date=test_dates[i]-2
+  
+  past_data <- yuz_temizleyici[event_date<=current_date,]
+  
+  yuz_temizleyici_ts <- ts(past_data$log_sold, frequency = 15)
+  yuz_temizleyici_decomposed <- decompose(yuz_temizleyici_ts,type = "additive")
+  model <- arima(yuz_temizleyici_decomposed$random,order = c(3,0,2))
+  forecasted=predict(model,n.ahead = 2)
+  yuz_temizleyici[nrow(yuz_temizleyici)-length(test_dates)+i,Model3:=forecasted$pred[2]+yuz_temizleyici_decomposed$seasonal[(nrow(yuz_temizleyici)-length(test_dates)+i)%%15+15]+yuz_temizleyici_decomposed$trend[max(which(!is.na(yuz_temizleyici_decomposed$trend)))]]
+}
+
+t3<-accu(yuz_temizleyici$sold_count[(nrow(yuz_temizleyici)+1-length(test_dates)):(nrow(yuz_temizleyici))],exp(yuz_temizleyici$Model3[(nrow(yuz_temizleyici)+1-length(test_dates)):(nrow(yuz_temizleyici))]))
+
+```
+
+```{r}
+
+
+yuz_temizleyici[,pred1:=exp(Model1)]
+yuz_temizleyici[,pred2:=exp(Model2)]
+yuz_temizleyici[,pred3:=exp(Model3)]
+
+```
+
+
+## Results
+
+```{r, warning=FALSE}
+ggplot(dis_fircasi,aes(x=event_date))+
+  geom_line(aes(y=exp(Model1)), color="red")+
+  xlim(as.Date("2021-05-28"),as.Date("2021-06-11"))+ #Update here
+  geom_line(aes(y=sold_count))+
+  geom_line(aes(y=exp(Model2)),color="blue")+
+  labs(title="Oral B - Actual vs. Predicted over time")
+```
+```{r}
+rbind(c("Model 1", m),c("Model 2",m2))
+```
+
+Both models cannot capture when there is a sudden increase. But in other periods, especially model 2 works quite well.
+
+
+```{r, warning=FALSE}
+ggplot(bebek_mendil,aes(x=event_date))+
+  geom_line(aes(y=exp(Model1)), color="red")+
+  xlim(as.Date("2021-05-28"),as.Date("2021-06-11"))+ #Update here
+  geom_line(aes(y=sold_count))+
+  geom_line(aes(y=exp(Model2)),color="blue")+
+  geom_line(aes(y=exp(Model3)),color="green")+
+  geom_line(aes(y=exp(Model4)),color="purple")+
+  labs(title="Sleepy - Actual vs. Predicted over time")
+```
+
+
+```{r}
+rbind(c("Model 1", s),c("Model 2",s2),c("Model 3", s3),c("Model 4",s4))
+```
+
+```{r, warning=FALSE}
+ggplot(yuz_temizleyici,aes(x=event_date))+
+  geom_line(aes(y=exp(Model1)), color="red")+
+  xlim(as.Date("2021-05-28"),as.Date("2021-06-11"))+ #Update here
+  geom_line(aes(y=sold_count))+
+  geom_line(aes(y=exp(Model2)),color="blue")+
+  geom_line(aes(y=exp(Model3)),color="green")+
+  labs(title="La Roche - Actual vs. Predicted over time")
+```
+
+```{r}
+rbind(c("Model 1", t),c("Model 2",t2),c("Model 3", t3))
+```
+
+## Leopard Skin Bikini
+
+```{r pressure, echo=FALSE}
+
+get_token <- function(username, password, url_site){
+  
+  post_body = list(username=username,password=password)
+  post_url_string = paste0(url_site,'/token/')
+  result = POST(post_url_string, body = post_body)
+  
+  # error handling (wrong credentials)
+  if(result$status_code==400){
+    print('Check your credentials')
+    return(0)
+  }
+  else if (result$status_code==201){
+    output = content(result)
+    token = output$key
+  }
+  
+  return(token)
+}
+
+get_data <- function(start_date='2020-03-20', token, url_site){
+  
+  post_body = list(start_date=start_date,username=username,password=password)
+  post_url_string = paste0(url_site,'/dataset/')
+  
+  header = add_headers(c(Authorization=paste('Token',token,sep=' ')))
+  result = GET(post_url_string, header, body = post_body)
+  output = content(result)
+  data = data.table::rbindlist(output)
+  data[,event_date:=as.Date(event_date)]
+  data = data[order(product_content_id,event_date)]
+  return(data)
+}
+
+
+send_submission <- function(predictions, token, url_site, submit_now=F){
+  
+  format_check=check_format(predictions)
+  if(!format_check){
+    return(FALSE)
+  }
+  
+  post_string="list("
+  for(i in 1:nrow(predictions)){
+    post_string=sprintf("%s'%s'=%s",post_string,predictions$product_content_id[i],predictions$forecast[i])
+    if(i<nrow(predictions)){
+      post_string=sprintf("%s,",post_string)
+    } else {
+      post_string=sprintf("%s)",post_string)
+    }
+  }
+  
+  submission = eval(parse(text=post_string))
+  json_body = jsonlite::toJSON(submission, auto_unbox = TRUE)
+  submission=list(submission=json_body)
+  
+  print(submission)
+  # {"31515569":2.4,"32737302":2.4,"32939029":2.4,"4066298":2.4,"48740784":2.4,"6676673":2.4, "7061886":2.4, "73318567":2.4, "85004":2.4} 
+  
+  if(!submit_now){
+    print("You did not submit.")
+    return(FALSE)      
+  }
+  
+  
+  header = add_headers(c(Authorization=paste('Token',token,sep=' ')))
+  post_url_string = paste0(url_site,'/submission/')
+  result = POST(post_url_string, header, body=submission)
+  
+  if (result$status_code==201){
+    print("Successfully submitted. Below you can see the details of your submission")
+  } else {
+    print("Could not submit. Please check the error message below, contact the assistant if needed.")
+  }
+  
+  print(content(result))
+  
+}
+
+check_format <- function(predictions){
+  
+  if(is.data.frame(predictions) | is.data.frame(predictions)){
+    if(all(c('product_content_id','forecast') %in% names(predictions))){
+      if(is.numeric(predictions$forecast)){
+        print("Format OK")
+        return(TRUE)
+      } else {
+        print("forecast information is not numeric")
+        return(FALSE)                
+      }
+    } else {
+      print("Wrong column names. Please provide 'product_content_id' and 'forecast' columns")
+      return(FALSE)
+    }
+    
+  } else {
+    print("Wrong format. Please provide data.frame or data.table object")
+    return(FALSE)
+  }
+  
+}
+
+# this part is main code
+subm_url = 'http://46.101.163.177'
+
+u_name = "Group8"
+p_word = "aBbYZj795YeGEupS"
+submit_now = FALSE
+
+username = u_name
+password = p_word
+
+token = '84ea343ee6df0a64d2b63baaac94745d6f668072'
+#token = get_token(username=u_name, password=p_word, url=subm_url)
+
+data = get_data(token=token,url=subm_url)
+combine_data <- data[event_date > as.Date('2021-05-31')]
+
+#predictions=unique(data[,list(product_content_id)])
+#predictions[,forecast:=2.3]
+
+#send_submission(predictions, token, url=subm_url, submit_now=F)
+
+ProjectRawData <- read_csv("ProjectRawData.csv")
+
+raw_data <- rbind(ProjectRawData ,combine_data)
+
+
+```
+
+Editing the data:
+
+```{r}
+raw_data <- data.table(raw_data)
+raw_data[, "event_date" := as.Date(event_date)]
+raw_data <- raw_data[event_date >= '2020-05-25']
+raw_data[, month := month(event_date, label = TRUE)]
+raw_data[, wday := wday(event_date, label = TRUE)]
+raw_data <- raw_data[order(event_date),]
+```
+
+The leopard skin bikini is the next product. When the nature of swim suits are considered, we expect them to sell more as the summer gets closer. During the winter, people do not tend to buy bikini as much. To be able to understand this product structure, we examine Trendyol's Website and examine the positioning of this specific bikini top. Although the positioning has changed during the period, it is a semi-popular model in Trendyol. There is an alternative for this bikini in the website, the same top with the flower skin. We examine also the product page and check for the campaigns regularly. In our first observation we have noticed that there were a current stock out on this model, the remaining ones are only in size 40 and 42.
+
+Reading the data:
+
+```{r}
+data_leopar <- raw_data[product_content_id == 73318567] #leopar
+```
+
+To understand the trend of bikini better, the time series graph of the number of sold items should be examined. 
+
+```{r}
+ggplot(data_leopar, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count), color = "red") + ggtitle("Sales of Leopard Bikini") + xlab("day") + ylab("Sales")
+```
+
+There are lots of missing points in the data. And a pattern that we certainly would not accept from the bikini. During April, it has no sales. This is an unexpected situation and can impact our results. We believe that this is due to the stock loss or a planned decision. That's why we decided to omit those period and focus after april to have a better understanding in the trend and not effect by this bizzarre situation.
+
+To have a general understanding, we also check the autocorrelation and partial autocorrelation.
+
+
+```{r}
+acf(data_leopar$sold_count)
+pacf(data_leopar$sold_count)
+```
+We detect the general trend,the data depended on the previous one. However there is no significant daily trend at the first look.
+
+In the model, we will use regressor in various ways, however in order to use the regressors in our predictions, we decided to use lagged variables. To decide which variables, we need to analyize the correlation plot. Than, we will omit the data after April and we do not loose any more data while lag shifting.
+
+```{r, warning=FALSE}
+leopar <- data_leopar
+numeric_data <- leopar
+numeric_data$event_date = NULL
+numeric_data$product_content_id = NULL
+numeric_data$trend= NULL
+numeric_data$month= NULL
+numeric_data$wday= NULL
+numeric_data <- na.omit(numeric_data)
+str(numeric_data)
+
+correl_info = cor(numeric_data)
+ggcorrplot(correl_info, hc.order = TRUE, type = "lower",lab = TRUE)
+
+
+```
+
+The biggest correlation with the data is with basket_count, visit_count and favored_count. Thus we are adding their lagged version and examine also their correlation. 
+We can than trim the data, and check for the combinations.
+
+```{r}
+leopar <- leopar[,favored_count_lag := shift(favored_count, 2)]
+leopar <- leopar[,basket_count_lag := shift(basket_count, 2)]
+leopar <- leopar[,visit_count_lag := shift(visit_count, 2)]
+
+leopar_reduced <- leopar[event_date >= '2021-04-29'] 
+
+numeric_data <- leopar_reduced
+numeric_data$event_date = NULL
+numeric_data$product_content_id = NULL
+numeric_data$trend= NULL
+numeric_data$month= NULL
+numeric_data$wday= NULL
+numeric_data <- na.omit(numeric_data)
+str(numeric_data)
+
+correl_info = cor(numeric_data)
+ggcorrplot(correl_info, hc.order = TRUE, type = "lower",lab = TRUE)
+
+```
+
+The time series of the trimmed data and as the price is an important factor generally, however we did not see that effect in the correlation so we also plot the price.
+
+```{r}
+ggplot(leopar_reduced, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count, color = "Sales")) + 
+  geom_line(aes(y = price, color="Price")) + scale_x_date(date_breaks = "1 day", date_labels = "%d") + ggtitle("Sales of Leopard Bikini") + xlab("day") + ylab("Sales")
+```
+
+
+The price does not change over the time and as we examine the results day by day, we see that not every kind of prices are reflected in the price section. We believe the effect of price is not reflecting in the data. As the discount for example at the basket does not included in the price.
+
+We have observe also a very interesting trend here. Starting from June, the sales drop drastically which is not expecting as the summer arrives. We have observed that there is stock out currently. We assume that the stock-out start in June and its the result of the low sales. We added this infomation into the model and we built our first model with linear regressors. After building the model with regressors, we will add the arima to the residuals.
+
+### Model with Dynamic Regression
+
+Adding the stock out factor and using it in a model:
+
+
+```{r}
+leopar_reduced <- leopar_reduced[,stock_out := ifelse(sold_count < 75, 1, 0)]
+
+leopar_reduced$stock_out <- as.factor(leopar_reduced$stock_out)
+
+model1=lm(sold_count~ stock_out, leopar_reduced)
+
+summary(model1)
+```
+
+The adjusted R square performed well, let's add the correlated lagged variables one by one to see whether they improve the model or not.
+
+```{r}
+
+model1=lm(sold_count~ stock_out + basket_count_lag, leopar_reduced)
+
+summary(model1)
+```
+
+The adjusted R squared increased, ading the second:
+
+```{r}
+
+model1=lm(sold_count~ stock_out + basket_count_lag + visit_count_lag, leopar_reduced)
+
+summary(model1)
+```
+
+Again the adjusted R squared has increased. Adding the third:
+
+```{r}
+
+model1=lm(sold_count ~ stock_out + basket_count_lag + visit_count_lag + favored_count_lag, leopar_reduced)
+summary(model1)
+
+```
+This also has improved the model. Let's add wday to see the week of days have an imprvement on the model.
+
+```{r}
+leopar_reduced$wday <- as.factor(leopar_reduced$wday)
+model=lm(sold_count ~ stock_out + basket_count_lag + visit_count_lag + favored_count_lag + wday, leopar_reduced)
+
+summary(model)
+```
+The adjusted R squared remains the same, we won't use it. We need to check the residuals for our final regressor model.
+
+
+```{r}
+plot(model1$residuals)
+checkresiduals(model1)
+```
+
+The residuals seem randomly distributed and normalized from the graph. We can continue with this methodolojy.
+
+To build the arima model, we need to examine autocorrelation and partial auto correlation should be examined.
+
+```{r}
+modellastts <- (model1$residuals)
+acf(modellastts)
+pacf(modellastts)
+
+```
+The autocorrelation plot is decreasing. We see significant partial auto correlation at lag 4 and 1. Let's check auto.arima suggestion:
+
+```{r}
+auto.arima(modellastts)
+modelarima1 <- arima(modellastts, order=c(1,0,0))
+print(modelarima1)
+```
+Our approach AR(4) as there is significant value there:
+
+```{r}
+modelarima <- arima(modellastts, order=c(4,0,0))
+print(modelarima)
+```
+
+This performed worse than the arima suggestion, let's add also suggested MA into the model.
+
+
+```{r}
+modelarima <- arima(modellastts, order=c(4,0,1))
+print(modelarima)
+
+```
+
+The AIC is higher, the performance has lowered. We will use (0,0,1) for our analysis.
+
+```{r}
+
+predicted1 = modellastts - modelarima1$residuals 
+
+leopar_reduced = leopar_reduced[, predictedlinear := leopar_reduced$sold_count - predicted1]
+
+ggplot(leopar_reduced, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count, color = "Sales")) + 
+  geom_line(aes(y = predictedlinear, color="Prediction")) + scale_x_date(date_breaks = "1 day", date_labels = "%d")+ ggtitle("Sales of Leopard Bikini") + xlab("day") + ylab("Sales")
+
+```
+
+This model seems to be able to catch the trend. 
+
+To evaluate the performance we need to estimate the test period and check the MWAPE.
+
+```{r}
+
+test_start=as.Date('2021-06-11')
+test_end=as.Date('2021-06-30')
+
+test_dates=seq(test_start,test_end,by='day')
+leopar_reduced$Model1 =NULL
+for(i in 1:length(test_dates)){
+  current_date=test_dates[i]-2
+  past_data <- leopar_reduced[event_date<=current_date,]
+  fitted_lm= lm(sold_count ~ stock_out, past_data)
+  rm <- arima(fitted_lm$residual, order = c(0,0,1))
+  forecasted=predict(fitted_lm,leopar_reduced[event_date == test_dates[i],])
+  leopar_reduced[nrow(leopar_reduced)-length(test_dates)+i, Model1 := (forecasted+forecast(rm,h=2)$mean[2])]
+  
+}
+
+  m_with_regression<-accu(leopar_reduced$sold_count[(nrow(leopar_reduced)-length(test_dates)-1):(nrow(leopar_reduced)-2)],(leopar_reduced$Model1[(nrow(leopar_reduced)+1-length(test_dates)):(nrow(leopar_reduced)-0)])) 
+
+```
+
+### Models Arima and Arimax
+
+For the second model, we will first decompose the series and build an ARIMA model on the decomposed series.
+
+
+Checking the autocorrelation and partial autocorrelation:
+
+```{r}
+acf(leopar_reduced$sold_count, main= "Daily Autocorrelation")
+pacf(leopar_reduced$sold_count, main= "Daily Autocorrelation")
+```
+
+
+The autocorrelation plot indicates that there is a trend as discussed at the analysis part. Although we did not see any peak point at day seven, it is logical to have a daily trend. That's why, we will make the decomposition daily and have the frequency of 7. As the variance change over the time, we will make a multiplicative decomposition firstly and according to the results make an additive model.
+
+
+```{r}
+leoparts <- ts(leopar_reduced$sold_count,freq=7)
+data_mult<-decompose(leoparts,type="multiplicative")
+random=data_mult$random
+plot(data_mult)
+```
+
+
+The trend is increasing as the summer time arrives, however we can see a sharp decrease in June due to the stock out of smaller sizes. When we examine the random part of the data, it seems pretty stationary with near to stable variance and mean.
+
+In this graph it is hard to identify seasonal daily trend, so we need to have a closer look. 
+
+```{r}
+plot(data_mult$seasonal[1:7], xlab = "Hour", ylab = "Multiplicative of Day", main = "Seasonal Component of Trend for Multiplicative")
+```
+
+```{r}
+mean_sold=data_leopar[,list(m_sold = mean(sold_count,na.rm=T)), by="wday"]
+mean_sold
+```
+
+To understand the multiplicative decomposition, we examine the multipliers of the days. To be able to compare the multiplicative behaviours and data, we also examine the mean sold of each day. Saturdays and Sundays are the maximum points and the trend also reflect it
+
+Having higher sales on the weekends are normal, as people have time to shop more.
+
+To check the stationarity of the detrend part we use KPSS test
+
+```{r}
+unt_test=ur.kpss(data_mult$random) 
+summary(unt_test)
+```
+The data is stationary, because 0.0438 is lower even 0.347. Differencing results in 0.0519<0.347 implies corresponding the p-value is larger than 10%, we fail to reject the null hypothesis claiming the data are stationary.
+
+We will also check the additive decomposition.
+
+
+```{r}
+leoparts <- ts(leopar_reduced$sold_count,freq=7)
+data_add<-decompose(leoparts,type="additive")
+random1=data_add$random
+plot(data_add)
+```
+
+The trend is very similar to the additive version.
+
+In this graph it is hard to identify seasonal daily trend, so we need to have a closer look. 
+
+```{r}
+plot(data_add$seasonal[1:7], xlab = "Hour", ylab = "Additive of Day", main = "Seasonal Component of Trend for Additive")
+```
+
+```{r}
+mean_sold=data_leopar[,list(m_sold = mean(sold_count,na.rm=T)), by="wday"]
+mean_sold
+```
+
+In the additive model, the multipliers of days not very similar to the mean sales of each days. The highest points are on Wednesdays and Thurdays, this model did not reflect the trend very well. 
+
+To check the stationarity of the detrend part we use KPSS test again
+
+```{r}
+unt_test=ur.kpss(data_add$random) 
+summary(unt_test)
+```
+The data is stationary, because 0.0353 is lower even 0.347. Differencing results in 0.0519<0.347 implies corresponding the p-value is larger than 10%, we fail to reject the null hypothesis claiming the data are stationary. This is larger than the multiplicative decomposition so we will continue my analysis with the a multiplicative model.
+
+To decide the arima, we need to check the autocorrelation and the partial auto correlation function.
+
+```{r}
+acf(random, na.action = na.pass, main= "Detrend's Autocorrelation")
+pacf(random, na.action = na.pass, main= "Detrend's Autocorrelation")
+```
+We can see that the autocorrelation plot is decreasing. We can see the significant partial autocorrelation at lag 3. That's why AR(3) will be tried first.
+
+```{r}
+model <- arima(random, order=c(3,0,0))
+print(model)
+```
+Also, the partial autocorrelaton plot seems to be decreasing and there is significant autocorrelation is at lag 3 at the autocorrelation plot. Let's also try MA(3).
+
+```{r}
+modelf <- arima(random, order=c(0,0,3))
+print(modelf)
+```
+
+As the AIC is lower than the first one this model is better.
+
+We need to decide their combination and try the neighbours to decide which model to use.
+
+```{r}
+model <- arima(random, order=c(3,0,3))
+print(model)
+```
+
+The model has worsened so we will use 0,0,3
+
+
+I will use two  model only arima and arima with regressors
+
+#### Arimax
+
+We know which parameter can be used as a regressor from the first part.
+
+```{r}
+leopar_reduced = leopar_reduced[,random := data_mult$random]
+reg_matrix=cbind( leopar_reduced$stock_out) # can add more if any other regressors exist
+   model1 <- arima(leopar_reduced$random, order = c(0,0,3), xreg = reg_matrix)
+  summary(model1)
+```
+
+When have a slightly improvement, let's add others. I added one by one and the lowest AIC values was with these values.
+
+```{r}
+
+reg_matrix=cbind( leopar_reduced$stock_out, leopar_reduced$basket_count_lag, leopar_reduced$visit_count_lag) # can add more if any other regressors exist
+   modelwithreg <- arima(leopar_reduced$random, order = c(0,0,3), xreg = reg_matrix)
+  summary(modelwithreg)
+```
+
+
+
+```{r}
+
+model_fitted <- leopar_reduced$random - residuals(modelwithreg)
+leopar_reduced <- cbind(leopar_reduced, data_mult$seasonal, data_mult$trend, model_fitted)
+leopar_reduced <-leopar_reduced[,predictwithreg := data_mult$seasonal * data_mult$trend * model_fitted] 
+
+model_fitted_2 <- leopar_reduced$random - residuals(modelf)
+leopar_reduced <- cbind(leopar_reduced, model_fitted_2)
+leopar_reduced <-leopar_reduced[,predictonlyarima := data_mult$seasonal * data_mult$trend * model_fitted_2] 
+
+
+ggplot(leopar_reduced, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count, color = "Actual Sales" )) +
+  geom_line(aes(y =predictwithreg, color = "ARIMAX Prediction" ))  +
+   geom_line(aes(y = predictonlyarima, color = "ARIMA Predcition")) +
+    geom_line(aes(y = predictedlinear, color = "Linear Predcition")) + ggtitle("Sales of Leopard Bikini") + xlab("day") + ylab("Sales")
+```
+Except for the peak points, the data seems to catch the trend well. As we can see from the plot both model yields pretty similar results.
+
+Let's compare all models performance
+
+We need to seperate the test and train data. We will use last 7 days to make the prediction. In order to compare the model we will examine both arima with regressor and arima stand alone.
+
+Arima with regressor:
+
+```{r, warning=FALSE}
+
+train_start=as.Date('2021-01-23')
+test_start=as.Date('2021-06-11')
+test_end=as.Date('2021-06-30')
+
+test_dates=seq(test_start,test_end,by='day')
+
+for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- leopar_reduced[event_date<=current_date,]
+    
+    leopar_ts <- ts(past_data$sold_count, frequency = 7)  
+    leopar_decomposed <- decompose(leopar_ts, type="multiplicative")
+    
+    reg_matrix=cbind( past_data$stock_out, past_data$basket_count_lag, past_data$visit_count_lag) 
+    
+    model <- arima(leopar_decomposed$random,order = c(0,0,3),xreg = reg_matrix)
+    
+    forecasted=predict(model,n.ahead = 2,newxreg = leopar_reduced[event_date==test_dates[i],cbind(stock_out,basket_count_lag,visit_count_lag)])
+    leopar_reduced[nrow(leopar_reduced)-length(test_dates)+i-2, Model_reg := forecasted$pred[2]*leopar_decomposed$seasonal[(nrow(leopar_reduced)-length(test_dates)+i-2)%%7+7]*leopar_decomposed$trend[max(which(!is.na(leopar_decomposed$trend)))]]
+  }
+  m_with_reg<-accu(leopar_reduced$sold_count[(nrow(leopar_reduced)-1-length(test_dates)):(nrow(leopar_reduced)-2)],(leopar_reduced$Model_reg[(nrow(leopar_reduced)-1-length(test_dates)):(nrow(leopar_reduced)-2)]))  
+ 
+```
+
+Arima without regressor:
+
+```{r}
+for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- leopar_reduced[event_date<=current_date,]
+    
+    leopar_ts <- ts(past_data$sold_count, frequency = 7)  
+    leopar_decomposed <- decompose(leopar_ts, type="multiplicative")
+    model <- arima(leopar_decomposed$random,order = c(0,0,3))
+    
+    forecasted=predict(model,n.ahead = 2)
+    leopar_reduced[nrow(leopar_reduced)-length(test_dates)+i-2, Model_nolag := forecasted$pred[2]*leopar_decomposed$seasonal[(nrow(leopar_reduced)-length(test_dates)+i-2)%%7+7]*leopar_decomposed$trend[max(which(!is.na(leopar_decomposed$trend)))]]
+  }
+  m_only_arima<-accu(leopar_reduced$sold_count[(nrow(leopar_reduced)-1-length(test_dates)):(nrow(leopar_reduced)-2)],(leopar_reduced$Model_nolag[(nrow(leopar_reduced)-1-length(test_dates)):(nrow(leopar_reduced)-2)]))  
+```
+
+
+
+```{r}
+rbind(m_with_reg,m_only_arima, m_with_regression)
+```
+
+Although regressor + arima model seems to catch the trend better, when tested on the ungiven period. Regrssion + arima yield better resÄ±lts. When we compare the ARIMA results each other, ARIMA without regressors seem to be performed slighly better. However, this is not a significant difference. 
+
+In the analysis theie combinations will be used
+
+## Black Bikini
+
+The Black bikini is the next product. When the nature of swim suits are considered, we expect them to sell more as the summer gets closer. During the winter, people do not tend to buy bikini as much. To be able to understand this product structure, we examine Trendyol's Website and examine the positioning of this specific bikini top. 
+
+Although the positioning has changed during the period, it is a semi-popular model in Trendyol. There are many black bikini tops in Trendyol. We examine also the product page and check for the campaigns regularly. In our first observation we have noticed that there were a current stock out on this model on the larger sizes, 
+
+Reading the data:
+
+```{r}
+data_siyah <- raw_data[product_content_id == 32737302] 
+```
+
+To understand the trend, the time series graph of the number of sold items should be examined. 
+
+```{r}
+ggplot(data_siyah, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count), color = "red") + ggtitle("Sales of Black Bikini") + xlab("day") + ylab("Sales")
+```
+
+There are lots of missing points in the data. As we don't have a full year data, we cannot check for a monthly trend. We will check for a daily trend and examine the autocorrelation plot. 
+
+```{r}
+acf(data_siyah$sold_count, main= "Daily Autocorrelation")
+siyah <- data_siyah
+```
+
+The data told us there is a trend, however any specific lag does not stand out. We do not omit N/A's in order not to loose any information.
+
+
+Although we did not see any peak point at day seven, it is logical to have a daily trend. That's why we will make the decomposition daily. As the variance change over the time, we will first make a multiplicative decomposition.
+
+The 0's can create complexity for the model. That's why we trim the model as we trim the Leopard Bikini.
+
+```{r}
+siyah <- siyah[event_date >= '2021-02-20'] 
+```
+
+Ploti-ting the trimmed version:
+
+```{r}
+ggplot(siyah, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count), color = "red") + ggtitle("Sales of Black Bikini") + xlab("day") + ylab("Sales")
+```
+
+As there is an obvious changing variance in the graph, we will make our analysis with the log version.
+
+```{r}
+acf(log(siyah$sold_count), main= "Daily Autocorrelation")
+pacf(log(siyah$sold_count), main= "Daily Autocorrelation")
+```
+
+As can be seen from the trend data, at lag 10 it is at its max. From partial autocorrelation at lag 7, we can see its above the limit. Weekly trend makes sense that's why we are starting our data analysis, with that.
+
+We will try both multiplicative and additive model than decide the best fitted one for the model.
+
+```{r}
+siyahts <- ts(log(siyah$sold_count),freq=7)
+data_mult<-decompose(siyahts,type="multiplicative")
+random=data_mult$random
+plot(data_mult)
+```
+
+The trend is increasing as the summer time arrives, the general trend catches it. In a general look it looks stationary.
+
+In this graph it is hard to identify seasonal trend, daily trend, so we need to have a closer look.
+
+```{r}
+plot(data_mult$seasonal[1:7], xlab = "Hour", ylab = "Multiplicative of Day", main = "Seasonal Component of Trend for Multiplicative")
+```
+
+To understand the multiplicative decomposition, we examine the multipliers of the days. To be able to compare the multiplicative behaviours and data, we also examine the mean sales of each day. However, although the mean very high on Wednesdays, the multiplier of Wednesdays are low.
+
+Having higher sales on the early weekdays are normal, as people want the delivery before the end of the week.
+
+```{r}
+mean_sold=siyah[,list(mean_sold = mean(log(sold_count),na.rm=T)), by="wday"]
+mean_sold
+```
+
+To check the stationarity of the detrend part we use KPSS test
+
+```{r}
+unt_test=ur.kpss(data_mult$random) 
+summary(unt_test)
+```
+The data is stationary, because 0.0266 is lower even 0.347. Differencing results in 0.0519<0.347 implies corresponding the p-value is larger than 10%, we fail to reject the null hypothesis claiming the data are stationary.
+
+The multipliers of the multiplicative model were not satisfying, we will also check the additive decomposition.
+
+```{r}
+siyahts <- ts(log(siyah$sold_count),freq=7)
+data_add<-decompose(siyahts,type="additive")
+random=data_add$random
+plot(data_add)
+```
+
+The trend is very similar to the additive version. 
+
+In this graph it is hard to identify seasonal daily trend, so we need to have a closer look. 
+
+```{r}
+plot(data_add$seasonal[1:7], xlab = "Hour", ylab = "Additive of Day", main = "Seasonal Component of Trend for Additive")
+```
+They yield very similar results with the additive model.
+
+
+```{r}
+unt_test=ur.kpss(data_add$random) 
+summary(unt_test)
+```
+The data is stationary, because 0.0356 is lower even 0.347. Differencing results in 0.0519<0.347 implies corresponding the p-value is larger than 10%, we fail to reject the null hypothesis claiming the data are stationary. 
+
+The results are pretty similar, that's why we choose to continue with additive model.
+
+```{r}
+acf(random, na.action = na.pass, main= "Detrend's Autocorrelation")
+pacf(random, na.action = na.pass, main= "Detrend's Autocorrelation")
+```
+We can see that the autocorrelation plot is decreasing. We can see the significant partial autocorrelation in lag 6. That's why AR(6) will be tried first.
+
+```{r}
+model <- arima(random, order=c(6,0,0))
+print(model)
+```
+Also, the partial autocorrelaton plot is decreasing and max autocorrelation is at lag 3. Let's also try MA(3).
+
+```{r}
+modelf <- arima(random, order=c(0,0,3))
+print(modelf)
+```
+
+As the AIC is lower than the first one this model is better.
+
+We need to decide their combination and try the neighbours to decide which model to use.
+
+```{r}
+model <- arima(random, order=c(6,0,3))
+print(model)
+```
+
+The model improved, we will continue with the neighbors.
+
+```{r}
+modelf <- arima(random, order=c(6,0,4))
+print(modelf)
+```
+
+It has improved again so we will choose (6,0,4) for the arima models.
+
+To understand the the the possible regressors that can be used in the ARIMA model, the correlations with both detrend data and sold_count is important. 
+
+Than, the lagged variable will be adwded to the model as for the predictions we need to have the data.
+
+```{r, warning=FALSE}
+siyah <- siyah[, random := data_add$random]
+numeric_data <- siyah
+numeric_data$event_date = NULL
+numeric_data$product_content_id = NULL
+numeric_data$trend= NULL
+numeric_data$month= NULL
+numeric_data$wday= NULL
+numeric_data$random= as.numeric(numeric_data$random)
+numeric_data <- na.omit(numeric_data)
+str(numeric_data)
+
+correl_info = cor(numeric_data)
+ggcorrplot(correl_info, hc.order = TRUE, type = "lower",lab = TRUE)
+
+
+```
+
+The biggest correlation with the data is basket_count, visit_count and the category_sold. To be able to use them in our prediction, we are adding the lagged versions. 
+
+For the price it does not have true correlation, as the data does not contain all the discount types.
+
+```{r}
+siyah <- siyah[,category_sold_lag := shift(category_sold, 2)]
+siyah <- siyah[,basket_count_lag := shift(basket_count, 2)]
+siyah <- siyah[,visit_count_lag := shift(visit_count, 2)]
+
+numeric_data <- siyah
+numeric_data$event_date = NULL
+numeric_data$product_content_id = NULL
+numeric_data$trend= NULL
+numeric_data$month= NULL
+numeric_data$wday= NULL
+numeric_data$random= as.numeric(numeric_data$random)
+numeric_data <- na.omit(numeric_data)
+str(numeric_data)
+
+correl_info = cor(numeric_data)
+ggcorrplot(correl_info, hc.order = TRUE, type = "lower",lab = TRUE)
+
+```
+
+The correlations with lagged variables are all very closed to each other. Let's add them one by one to see the improvement.
+
+```{r}
+reg_matrix=cbind( siyah$basket_count_lag)
+   model1 <- arima(siyah$random,order = c(6,0,4), xreg = reg_matrix)
+  summary(model1)
+```
+
+The AIC has improve when we add the lagged variable.
+
+Adding the second:
+
+```{r}
+reg_matrix=cbind( siyah$visit_count_lag, siyah$basket_count_lag) 
+
+   model2 <- arima(siyah$random,order = c(6,0,4), xreg = reg_matrix)
+  summary(model2)
+```
+
+AIC did not improved.
+
+```{r}
+
+model_fitted <- siyah$random - residuals(model1)
+siyah <- cbind(siyah, data_add$seasonal, data_add$trend, model_fitted)
+siyah <-siyah[,predictarima := exp(data_add$seasonal + data_add$trend + model_fitted) ] 
+
+model_fitted_2 <- siyah$random - residuals(modelf)
+siyah <- cbind(siyah, model_fitted_2)
+siyah <-siyah[,predictonlyar := exp(data_add$seasonal + data_add$trend + model_fitted_2)] 
+
+ggplot(siyah, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count, color = "Actual Sales")) + 
+  geom_line(aes(y = predictarima, color="ARIMA Prediction")) +
+  geom_line(aes(y = predictonlyar, color="ARIMAX Prediction")) + ggtitle("Sales of Black Bikini") + xlab("day") + ylab("Sales")
+
+```
+
+
+The AIC is higher, thus the performance is lowered with the addition of every regressors. Visit count lag has the lowest AIC values, we will make the prediction with it and only arima ad compare the results.
+
+Testing with regressor:
+
+```{r}
+
+train_start=as.Date('2021-01-23')
+test_start=as.Date('2021-06-24')
+test_end=as.Date('2021-06-30')
+
+test_dates=seq(test_start,test_end,by='day')
+
+for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- siyah[event_date<=current_date,]
+    
+    siyah_ts <- ts(log(past_data$sold_count), frequency = 7)  
+    siyah_decomposed <- decompose(siyah_ts, type="additive")
+    model <- arima(siyah_decomposed$random,order = c(6,0,4),xreg = past_data$basket_count_lag)
+    
+    forecasted=predict(model,n.ahead = 2,newxreg = siyah[event_date==test_dates[i],basket_count_lag])
+    siyah[nrow(siyah)-length(test_dates)+i-2, Model_reg :=  forecasted$pred[2]+siyah_decomposed$seasonal[(nrow(siyah)-length(test_dates)+i-2)%%7+7]+siyah_decomposed$trend[max(which(!is.na(siyah_decomposed$trend)))]]
+}
+siyah$Model_reg <- exp(siyah$Model_reg)
+  m_with_lag<-accu(siyah$sold_count[(nrow(siyah)-1-length(test_dates)):(nrow(siyah)-2)],(siyah$Model_reg[(nrow(siyah)-1-length(test_dates)):(nrow(siyah)-2)]))  
+ 
+```
+
+Testing with only arima:
+
+```{r, warning=FALSE}
+
+for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- siyah[event_date<=current_date,]
+    
+    siyah_ts <- ts(log(past_data$sold_count), frequency = 7)  
+    siyah_decomposed <- decompose(siyah_ts, type="additive")
+    model <- arima(siyah_decomposed$random,order = c(6,0,4))
+    
+    forecasted=predict(model,n.ahead = 2)
+    siyah[nrow(siyah)-length(test_dates)+i-2, Model_no_reg := forecasted$pred[2]+siyah_decomposed$seasonal[(nrow(siyah)-length(test_dates)+i-2)%%7+7]+siyah_decomposed$trend[max(which(!is.na(siyah_decomposed$trend)))]]
+}
+siyah$Model_no_reg <- exp(siyah$Model_no_reg)
+  m_without_lag<-accu(siyah$sold_count[(nrow(siyah)-1-length(test_dates)):(nrow(siyah)-2)],(siyah$Model_no_reg[(nrow(siyah)-1-length(test_dates)):(nrow(siyah)-2)]))  
+  
+```
+```{r}
+rbind( m_with_lag, m_without_lag )
+```
+
+The model performed much better when lagged are included.
+
+## Leggings
+
+The next product is the leggings. Leggings have a large portfolio at Trendyol. Our product is one of the popular leggings. Leggings can be worn in any seasons, but we can expect more sales when the wheather is not too cold or too hot, during spring or autumn. 
+
+The product depends heavily on the price, however, as the price here do not involve every discount, the relationship is not clear on the data.  
+
+```{r}
+data_tayt <- raw_data[product_content_id == 31515569]
+```
+
+To have a better understanding, we plot the time series of the legging sales 
+
+```{r}
+ggplot(data_tayt, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count), color = "red") + ggtitle("Sales of Leggings") + xlab("day") + ylab("Sales")
+```
+
+ We will check for a daily trend, we do not have enough data to check monthly or weekly trend. We expect a 7 days frequency, to be able to see the seasonlity we will control autocorrelation.
+
+```{r}
+acf(data_tayt$sold_count, main= "Daily Autocorrelation")
+pacf(data_tayt$sold_count, main= "Daily Autocorrelation")
+```
+
+We have a peak at lag 16. We will use it in the decomposition. We will also check 7 days decomposition and compare the two according to their 
+
+
+In order not to lose information, we do not delete N/A's, the days with 0 sales
+
+
+Although we did not see any peak point at day seven, it is logical to have a daily trend. That's why we will make the decomposition daily. As the variance change over the time, we will make a multiplicative decomposition. As there is a peak at lag 16, we will also try decomposition at lag 16.
+
+```{r}
+tayt <- data_tayt
+taytts <- ts(tayt$sold_count,freq=7)
+data_mult<-decompose(taytts,type="multiplicative")
+random=data_mult$random
+plot(data_mult)
+```
+
+We have peaks in the, there are peak sales in the November. The leggings can be preffered to be weared in the autumun. This can be also the low prices in tht time. The trend part of the decomposition seems to catch the overall trend.
+
+When we examine the detrend part, we see a stationary data with a constant mean and variance.
+
+In this graph it is hard to identify seasonal trend, daily trend, so we need to have a closer look.
+
+```{r}
+plot(data_mult$seasonal[1:7], xlab = "Hour", ylab = "Multiplicative of Day", main = "Seasonal Component of Trend for Multiplicative")
+```
+
+To compare the seasonality multipliers with sales mean of that days, we examine the mean sales:
+
+```{r}
+mean_sold=tayt[,list(mean_sold = mean(sold_count,na.rm=T)), by="wday"]
+mean_sold
+```
+
+The seasonality seems to reflect 
+
+To check the stationarity of the detrend part
+
+```{r}
+unt_test=ur.kpss(data_mult$random) 
+summary(unt_test)
+```
+
+The data is stationary, because 0.1325 is lower even 0.347. Differencing results in 0.0519<0.347 implies corresponding the p-value is larger than 10%, we fail to reject the null hypothesis claiming the data are stationary.
+
+We will also control the additive decomposition to see whether it performs better.
+
+```{r}
+taytts <- ts(tayt$sold_count,freq=7)
+data_add<-decompose(taytts,type="additive")
+random=data_add$random
+plot(data_add)
+```
+
+The trend part of the decomposition seems to catch the overall trend weel. 
+
+When we examine the detrend part, we see a stationary data with a constant mean and variance. When compared to multiplicative the mean is smaller and the outlier peak can be identified in the detrend part.
+
+In this graph it is hard to identify seasonal trend, daily trend, so we need to have a closer look.
+
+```{r}
+plot(data_add$seasonal[1:7], xlab = "Hour", ylab = "Additive of Day", main = "Seasonal Component of Trend for Additive")
+```
+
+The seasonality seems to reflect the mean valeus of the days, the seasonality is pretty similar to the multiplicative decomposition results.
+
+To check the stationarity of the detrend part
+
+```{r}
+unt_test=ur.kpss(data_add$random) 
+summary(unt_test)
+```
+The data is stationary, because 0.0063 is lower even 0.347. Differencing results in 0.0519<0.347 implies corresponding the p-value is larger than 10%, we fail to reject the null hypothesis claiming the data are stationary. This is also smaller than the multiplicative decomposition, that's why we will continue with the additive decomposition.
+
+As the autocorrelation plot gives higher values at lag 16, we will examine the data. We will use addiitive decomposition as it performmed better for the decomposion with 7 days frequency.
+
+```{r}
+taytts <- ts(tayt$sold_count,freq=16)
+data_add_2<-decompose(taytts,type="additive")
+plot(data_add_2)
+```
+
+During the peak time, it seems like the data catches the decrease later. Random part seems similar to other model
+
+In this graph it is hard to identify seasonal trend, daily trend, so we need to have a closer look.
+
+```{r}
+plot(data_add_2$seasonal[1:16], xlab = "Hour", ylab = "Additive of Day", main = "Seasonal Component of Trend for Additive")
+```
+
+Seasonality seems to have the peaks at the second weeks Tuesdays and Wednesdays, however there is 16 days, we are tracking of the days of week in this decomposition. 
+
+To check the stationarity of the detrend part
+
+```{r}
+unt_test=ur.kpss(data_add_2$random) 
+summary(unt_test)
+```
+
+The random part is also stationary, however we will continue with our analysis with 7 days decomposition.
+
+### Arima and Arimax Models
+
+```{r}
+acf(random, na.action = na.pass, main= "Detrend's Autocorrelation")
+pacf(random, na.action = na.pass, main= "Detrend's Autocorrelation")
+```
+
+We can see that the autocorrelation plot is decreasing. We can see the significant partial autocorrelation at lag 4. That's why AR(4) will be tried first.
+
+```{r}
+model <- arima(random, order=c(4,0,0))
+print(model)
+```
+
+Also, the partial autocorrelaton plot is decreasing and significant autocorrelation is at lag 4. Let's also try MA(4).
+
+```{r}
+model <- arima(random, order=c(0,0,4))
+print(model)
+```
+
+
+As the AIC is lower than the first one this model is better.
+
+We need to decide their combination and try the neighbours to decide which model to use.
+
+```{r}
+model <- arima(random, order=c(4,0,4))
+print(model)
+```
+
+This is the lowest AIC, thus the best model. Trying the neighbors:
+
+```{r}
+model <- arima(random, order=c(3,0,4))
+print(model)
+```
+Using AR(3) increased the performance. Checking for MA(3):
+
+
+```{r}
+modelf <- arima(random, order=c(4,0,3))
+print(modelf)
+```
+This is the lowest AIC. We will continue our model with (4,0,3)
+
+To understand the the the possible regressors that can be used in the ARIMA model, the correlations with both detrend data and sold_count is important. 
+
+Than, the lagged variable will be addded to the model as for the predictions we need to have the data.
+
+
+```{r, warning=FALSE}
+tayt <- tayt[, random := data_add$random]
+numeric_data <- tayt
+numeric_data$event_date = NULL
+numeric_data$product_content_id = NULL
+numeric_data$trend= NULL
+numeric_data$month= NULL
+numeric_data$wday= NULL
+numeric_data$random= as.numeric(numeric_data$random)
+numeric_data <- na.omit(numeric_data)
+str(numeric_data)
+
+correl_info = cor(numeric_data)
+ggcorrplot(correl_info, hc.order = TRUE, type = "lower",lab = TRUE)
+
+
+```
+
+The biggest correlation with the data is basket_count and category_sold. To use them in the regression, we are adding to the model with the lagged versions.
+
+```{r}
+tayt <- tayt[,category_sold_lag := shift(category_sold, 2)]
+tayt <- tayt[,basket_count_lag := shift(basket_count, 2)]
+tayt <- tayt[,favored_count_lag := shift(favored_count, 2)]
+tayt <- tayt[,price_lag := shift(price, 2)]
+
+numeric_data <- tayt
+numeric_data$event_date = NULL
+numeric_data$product_content_id = NULL
+numeric_data$trend= NULL
+numeric_data$month= NULL
+numeric_data$wday= NULL
+numeric_data$random= as.numeric(numeric_data$random)
+numeric_data <- na.omit(numeric_data)
+str(numeric_data)
+
+correl_info = cor(numeric_data)
+ggcorrplot(correl_info, hc.order = TRUE, type = "lower",lab = TRUE)
+
+```
+
+The basket_count with lag have the highest autocorrelation, that's why start with it.
+
+```{r}
+
+reg_matrix=cbind( tayt$basket_count_lag) # can add more if any other regressors exist
+   model1 <- arima(tayt$random,order = c(4,0,3), xreg = reg_matrix)
+  summary(model)
+```
+The AIC remain the same, we can say that the model neither improved nor worsened.
+
+We add the other potential regressor to the model.
+
+```{r}
+reg_matrix=cbind(tayt$category_sold_lag) 
+
+   model1 <- arima(tayt$random,order = c(4,0,3), xreg = reg_matrix)
+  summary(model1)
+```
+
+The AIC is lowered, we can use the category_sold variable as lag
+
+Adding the price:
+
+```{r}
+reg_matrix=cbind(tayt$category_sold_lag) 
+
+   model1 <- arima(tayt$random,order = c(4,0,3), xreg = reg_matrix)
+  summary(model1)
+```
+
+To see ARIMA without lags and with lag in the same graph:
+
+```{r}
+
+model_fitted <- tayt$random - residuals(model1)
+tayt <- cbind(tayt, data_add$seasonal, data_add$trend, model_fitted)
+tayt <-tayt[,predictarima := data_add$seasonal + data_add$trend + model_fitted  ] 
+
+model_fitted_2 <- tayt$random - residuals(modelf)
+tayt <- cbind(tayt,model_fitted_2)
+tayt <-tayt[,predictarima_no_reg := data_add$seasonal + data_add$trend + model_fitted_2  ] 
+
+ggplot(tayt, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count, color = "sold_count")) + 
+  geom_line(aes(y = predictarima, color = "only_arima_prediction")) + 
+   geom_line(aes(y = predictarima_no_reg, color = "arima_with_lag")) + ggtitle("Sales of Leggings") + xlab("day") + ylab("Sales")
+```
+
+The two models yield pretty similar results and both seem to catch the trend except the peak points.
+
+To predict the data:
+
+```{r}
+
+train_start=as.Date('2021-01-23')
+test_start=as.Date('2021-06-23')
+test_end=as.Date('2021-06-30')
+
+test_dates=seq(test_start,test_end,by='day')
+
+for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- tayt[event_date<=current_date,]
+    
+    tayt_ts <- ts(past_data$sold_count, frequency = 7)  
+    tayt_decomposed <- decompose(tayt_ts, type="additive")
+    model <- arima(tayt_decomposed$random,order = c(4,0,3),xreg = past_data$basket_count_lag)
+    
+    forecasted=predict(model,n.ahead = 2,newxreg = tayt[event_date==test_dates[i],basket_count_lag])
+    tayt[nrow(tayt)-length(test_dates)+i-2, Model_reg := forecasted$pred[2]+tayt_decomposed$seasonal[(nrow(tayt)-length(test_dates)+i-2)%%7+7]+tayt_decomposed$trend[max(which(!is.na(tayt_decomposed$trend)))]]
+  }
+  m_with_7<-accu(tayt$sold_count[(nrow(tayt)-1-length(test_dates)):(nrow(tayt)-2)],(tayt$Model_reg[(nrow(tayt)-1-length(test_dates)):(nrow(tayt)-2)]))  
+ 
+```
+
+For the data with no regressors:
+
+```{r}
+for(i in 1:length(test_dates)){
+    
+    current_date=test_dates[i]-2
+    
+    past_data <- tayt[event_date<=current_date,]
+    
+    tayt_ts <- ts(past_data$sold_count, frequency =7)  
+    tayt_decomposed <- decompose(tayt_ts, type="additive")
+    model <- arima(tayt_decomposed$random,order = c(4,0,3))
+    
+    forecasted=predict(model,n.ahead = 2)
+    tayt[nrow(tayt)-length(test_dates)+i-2, Model_noreg := forecasted$pred[2]+tayt_decomposed$seasonal[(nrow(tayt)-length(test_dates)+i-2)%%7+7]+tayt_decomposed$trend[max(which(!is.na(tayt_decomposed$trend)))]]
+  }
+  m_with_no_reg<-accu(tayt$sold_count[(nrow(tayt)-1-length(test_dates)):(nrow(tayt)-2)],(tayt$Model_noreg[(nrow(tayt)-1-length(test_dates)):(nrow(tayt)-2)]))  
+ 
+```
+
+
+```{r}
+rbind(m_with_7,m_with_no_reg)
+```
+
+Arima with no reg performed better in terms of the performance measures WMAPE, MAPE, MAD is all lower with ARIMA with no regressors.
+
+### Manuel Price Adding Approach
+
+As For another approach of the Leggings, we have built a model that allows us to enter the current price of the leggings. It is hard to test this metholody with above methods, as we have an oppurtunity to include the discounts applied to the basket.
+
+We added 
+
+```{r}
+tayt_reduced <- na.omit(data_tayt)
+```
+
+Adding related variables one by one until adjusted R square did not improve:
+
+```{r}
+model = lm(sold_count~ basket_count_lag + price, tayt_reduced)
+summary(model)
+```
+```{r}
+model = lm(sold_count~ basket_count_lag + favored_count_lag + price, tayt_reduced)
+summary(model)
+```
+
+Adjusted R squared did not improve here, so we exclude it.
+
+```{r}
+model1 = lm(sold_count~ basket_count_lag + category_sold_lag + price, tayt_reduced)
+summary(model1)
+```
+
+This is the final model.
+
+Checking residuals:
+
+
+```{r}
+plot(model1$residuals)
+
+checkresiduals(model1$residuals) 
+
+```
+Residuals seems normal and their mean is around zero. It looks randomized except the outlier peak.
+
+Making the prediction:
+
+```{r}
+modellastts <- ts(model1$residuals)
+
+modelarima1 <- arima(modellastts, order=c(4,0,1))
+print(modelarima1)
+AIC(modelarima1)
+BIC(modelarima1)
+
+auto.arima(modellastts)
+
+predicted1 = modellastts - modelarima1$residuals 
+
+tayt_reduced = tayt_reduced[, predictedlinear := tayt_reduced$sold_count - predicted1]
+
+ggplot(tayt_reduced, aes(x=event_date)) + 
+  geom_line(aes(y = sold_count, color = "Actual Sales")) + 
+  geom_line(aes(y = predictedlinear, color="Prediction")) + scale_x_date(date_breaks = "1 day", date_labels = "%d") + ggtitle("Sales of Leggings") + xlab("day") + ylab("Sales")
+```
+The data seems well fitting.
+
+The prediction in this case allows us to manuel entry. As an example 56 is written. Each day expected price with all discounts have estimated and the result obtained from this model, impact the final estimation.
+
+```{r}
+model_forecast <- tail(predict(modelarima1, n.ahead = 2)$pred,1)
+
+x <- cbind(tail(tayt_reduced$basket_count,1),tail(tayt_reduced$category_sold,1),56)
+x <- as.data.table(x)
+names(x) = c("basket_count_lag",  "category_sold_lag", "price")
+
+p <- predict(model1, x) + tail(predict(modelarima1, n.ahead = 2)$pred,1)
+print(p)
+```
+
+Thanks to this method, we have interpret the effect of price and by multiplying the other methods with these, obtain better results.
+
+# Conclusion
+
+In this project, we have tried to estimate the daily sales of nine different product which are sold through Trendyol. Various approaches are used in the analysis such as dynamic regression, decomposition and sarima models. During the analysis, due to data availability we had to predict two days ahead which decreased the accuracy of our forecasts. Also, part of the data were missing. Thus, we were unable to these data as external regressors. In addition, we did not have the information about the future discounts or stockouts. When there was a discount or a stockout of a product our predictions became less accurate. Having access to these information would have greatly increased our prediction accuracy. Finally, as an improvement, generalized additive models, which are very strong in forecasting seasonal series, can be used to model the sales data. This approach would have generated more accurate predictions.
+
+# References
+1. D. Wei, P. Geng, L. Ying and L. Shuaipeng, "A prediction study on e-commerce sales based on structure time series model and web search data," The 26th Chinese Control and Decision Conference (2014 CCDC), 2014, pp. 5346-5351, doi: 10.1109/CCDC.2014.6852219.
+2. Singh, K., Booma, P. M., & Eaganathan, U. (2020). E-Commerce System for Sale Prediction Using Machine Learning Technique. Journal of Physics: Conference Series, 1712, 012042. https://doi.org/10.1088/1742-6596/1712/1/012042
+3. Maobin Li, Shouwen Ji, Gang Liu, "Forecasting of Chinese E-Commerce Sales: An Empirical Comparison of ARIMA, Nonlinear Autoregressive Neural Network, and a Combined ARIMA-NARNN Model", Mathematical Problems in Engineering, vol. 2018, Article ID 6924960, 12 pages, 2018. https://doi.org/10.1155/2018/6924960

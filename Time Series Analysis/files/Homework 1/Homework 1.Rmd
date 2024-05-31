@@ -1,0 +1,296 @@
+---
+title: "Homework 1"
+author: "Alp Serdaroğlu"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Introduction
+The amount of consumer loans given to the households is an important statistic for an economy. It is a proxy for household expenditure and the amount of debt households have. An increase in the consumer loans could indicate that there is an increase in household consumption. As a result, this can fuel the economic growth. On the other hand, an increase in the level of consumer loans also means that the liabilities of the households are increasing. In turn, this increases the risk of default for consumers.
+
+There are different types of consumer loans offered in the market. Most common types include mortgages, automobile loans, personal loans, and student loans. Data for the total amount of consumer loans are published by the [Central Bank of Republic of Turkey](https://evds2.tcmb.gov.tr/index.php?) every week. From this data, one can derive the net amount of consumer loan given in a particular period. In this study, the aim is to understand the relationship between the net amount of consumer loan given and various economic variables. Also, we aim to analyze the relationship between the economic statistics and Google searches for related keywords such as "consumer loans".
+
+# Part 1
+
+First, the data for total consumer credit volume data can be accessed using the 'EVDS' package in R. Along with the total consumer credit data, several economic series are selected to analyze the relationship between them. The selected data series are as follows:
+
++ Total Amount of Consumer Loans: Money and Banking Statistics
++ Weighted Average Interest Rate for Consumer Loans: Interest Rates
++ Housing Unit Prices: Housing and Construction Statistics
++ Unemployment Rate: Employment Statistics
+
+In this analysis, frequency of observations is once per month and study period is between January 2016 and December 2019. After accessing the data, the data is manipulated to create a data.table in the desired format.
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(data.table)
+library(ggplot2)
+library(skimr)
+library(EVDS)
+library(lubridate)
+set_evds_key("5S5HKJUZTB")
+```
+
+```{r Data Manipulation, echo=FALSE, message=FALSE, warning=FALSE}
+#PART I
+#Collecting data using the EVDS package
+#How does weekly consumer credits change with
+#Frequency of observations is monthly. Study period: January 2016 - December 2019
+data<-get_series(c("TP.KTFTUK","TP.TUKKRE.K001", "TP.YISGUCU2.G8", "TP.AKONUTSAT1.TOPLAM"), start_date = "01-12-2015", end_date = "31-12-2019")
+credit_table <- data.table(data$items) 
+
+setnames(credit_table,
+         c("TP_KTFTUK","TP_TUKKRE_K001", "TP_YISGUCU2_G8", "TP_AKONUTSAT1_TOPLAM"),
+         c("CreditInterestRate", "CreditVolume", "UnemploymentRate", "HouseSales"))
+
+#Data Manipulation - Arranging the date column
+credit_table$Tarih <- as.Date(as.POSIXct(as.numeric(unlist(credit_table$UNIXTIME)), origin = "1970-01-02"))
+credit_table[,"UNIXTIME" := NULL]
+Date <- credit_table$Tarih
+day(Date) <- 15
+credit_table[,Tarih := Date]
+
+#The amount of new consumer loans created is calculated from total volume of consumer loans.
+credit_table[,"NewCredit":= shift(as.numeric(credit_table$"CreditVolume"))]
+credit_table[,"CreditVolume" := as.numeric(CreditVolume)]
+credit_table[,"NewCredit" := (CreditVolume-NewCredit) / 1000]
+
+#Further data manipulations
+credit_table[,"CreditInterestRate" := round(as.numeric(`CreditInterestRate`),4)]
+credit_table[,"UnemploymentRate" := as.numeric(UnemploymentRate)]
+credit_table[,"HouseSales" := as.numeric(HouseSales)]
+credit_table <- credit_table[-1,]
+head(credit_table)
+```
+
+## Net Amount of Consumer Loans Given 
+By calculating the monthly change in the total consumer loans volume, one can calculate the net amount of consumer loans given in a month. This data can be visualized as follows:
+
+```{r Consumer Loan, echo=TRUE, warning=FALSE}
+ggplot(credit_table, aes(x = Tarih))+
+  geom_line(aes(y=NewCredit))+
+  labs(title = "New Consumer Loans Given", x = "Date", y = "New Consumer Loans Given (Million TL)")
+```
+
+The series display a fluctuating pattern through the years. Periods of increases are usually followed by a period of decline. The value of net amount of credit given can fall below zero. This will mean that the amount of credit paid back to banks is more than the new loan issued in a particular month.
+
+During the first two years, magnitudes of fluctuations are smaller compared the last two years, 2018 and 2019. Whereas the fluctuations in 2018 and 2019 have a much greater magnitude meaning that the amount of consumer loans given changes drastically during this period. There are two credit booms during which the net amount of consumer loan given rises sharply.
+
+Although, the data shows fluctuations over the years, no obvious seasonality can be observed over the months. Furthermore, based on the boxplot below, variance of the consumer loans given increases considerably in the last two years. Also, during this period, there is an increase in the frequency of extreme observations. 
+
+```{r Consumer Loan 2, warning=FALSE}
+ggplot(credit_table, aes(y = NewCredit, x = as.factor(year(Tarih))))+
+  geom_boxplot()+
+  labs(title = "Distribution of New Consumer Loans Based on the Year", x = "Year", y = "Consumer Loans")
+```
+
+There can be various mechanisms affecting the amount of consumer loans. In this study, interest rates, house sales, and unemployment rate are analyzed.
+
+## Interest Rates
+
+Interest rates is the most important factor that affects the amount of consumer loans issued as this variable can be interpreted as the price of borrowing money from a bank. It is expected that interest rates and consumer loans display an inverse relationship. There are multiple interest data available in the market. In this analysis, weighted average of the interest rates of the consumer loans that are given by the banks is used.
+
+```{r Interest Rates 1, warning=FALSE}
+ggplot(credit_table,aes(x= Tarih, ylab('Credit Interst Rate')))+
+  geom_line(aes(y = credit_table$CreditInterestRate))+
+  labs(title = "Interest Rates for Consumer Loans", x = "Date", y = "Interest Rate (%)")
+```
+
+There is an inverse relation between the interest rates and new consumer loans given. The time series for the interest rates is more stable in 2016 and 2017. Its slight decrease around the fourth quarter of 2016 and first quarter of 2017 is reflected in the new credit data. There is an apparent increasing trend in the new given loans around the same time period. The variance of the interest rates increases after the second half of 2018. The changes in the interest rates are reflected inversely in the credit data. Sharp increases in the rates in the second half of 2018 and Q4 of 2019 causes a decrease in the new consumer loans. Also, decreasing interest rates in 2018 Q4, 2019 Q1 and second half of 2019 result in a decrease in consumer loans. The inverse relationship between these two variables is clearly seen in the graph below.
+
+```{r Interest Rates 2, message=FALSE, warning=FALSE}
+ggplot(credit_table,aes(x = CreditInterestRate, y = NewCredit))+
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Consumer Loans vs Interest Rates", x = "Interest Rates (%)", y = "Consumer Credit (m TL)")
+
+```
+
+## House Sales
+
+Another statistic that can be correlated with the new consumer loans is the number of house sales. As mortgages is an important component of the consumer loans, its volume can be affected by the housing market. Considerable part of house sales is financed through mortgages. An increase in the number of house sales means that there are more candidates for a mortgage. It is expected that there is positive relationship between consumer loans and house sales.
+```{r Housing, message=FALSE}
+ggplot(credit_table,aes(x= Tarih))+
+  geom_line(aes(y = credit_table$HouseSales))+
+    labs(title = "House Sales", x = "Date", y = "House Sales (Units)")
+```
+
+Based on the above line graph, house sales through time fluctuates greatly. However, the trend after 2019, in which the sales decrease first and then increase, indicates that there may be a positive relation between loans and house sales. Before rising sharply in 2019, the data shows some seasonality. House sales tend to increase in the second and fourth quarter of the year. Also, there is one outlier which is considerably larger than other data points. To get a more accurate view, scatter plot of these diagrams are drawn.
+```{r Housing 2, message=FALSE, warning=FALSE}
+ggplot(credit_table,aes(y = NewCredit, x = HouseSales))+
+  geom_point()+
+  geom_smooth()+
+  labs(title = "House Sales vs Consumer Loans", x = "Consumer Loans (m TL)", y = "House Sales (Units)")
+```
+
+This scatter plot clearly indicates that there is a positive relationship between two variables. 
+
+## Unemployment Rate
+Furthermore, consumer loans should be affected by the unemployment rate. As unemployment rate rises, the disposable income of the households should decrease. This will lead to a decrease in consumption affecting the amount of consumer loans negatively. Consumers will have less tendency to borrow for large spending like house and automobiles.
+```{r Unemployment}
+ggplot(credit_table,aes(x= Tarih))+
+  geom_line(aes(y = credit_table$UnemploymentRate))+
+  labs(title = "Unemployment Rate", x = "Date", y = "Unemployment Rate (%)")
+```
+
+From the time series data, we can observe that the unemployment rate has a high variance with an overall increasing trend. There are several sharp increases. First of them is in last quarter of 2016. This is followed by a decrease in the consumer loans around the same period. The sharp decrease in the unemployment rate in the early 2017 is reflected by a small increase in the consumer loans. Beginning from the second quarter of the 2018, the unemployment rate is starting to increase sharply. In the same period, consumer loans given is also decreasing. Initial observations on the data suggests that there is a negative correlation between unemployment and consumer loans. However, the magnitudes of changes in each data set are often not proportional to each other. Also, timing of the effects on the series do not correspond to each other which suggests that there is a lag between the time series.
+
+```{r Unemployment 2, message=FALSE}
+ggplot(credit_table,aes(y = NewCredit, x = UnemploymentRate))+
+  geom_point()+
+  geom_smooth()+
+  labs(title = "Consumer Loans vs Unemployment Rate", x = "Unemployment Rate (%)", y = "Consumer Loans (m TL)")
+```
+
+The scatter plot of unemployment and consumer loans show no clear relation. The reason for this may be the time-lag between the time series. Also, there may be some problems in the collection of the unemployment data where people who are not working but also not looking for a job are not counted as unemployed. Lastly, increasing unemployment rates tend increase the variance in the consumer loans.
+
+# Part II
+
+In this section of our analysis, our aim is to analyze the relationship between the search volumes of certain keywords and economic statistics analyzed in Part I. The keywords that are considered are as follows:
+
++ "Tüketici Kredisi" - for Net Consumer Loans Given
++ "Faiz Oranları" - for Interest Rates
++ "Konut Kredisi" - for House Sales
++ "İş İlanı" - for Unemployment Rates
+
+The data for the search volumes are collected using [Google Trends](https://trends.google.com/trends/?geo=US). Data collected for the years 2016 through 2019. Frequency of observations is once per week.
+```{r Part II, echo=FALSE, message=FALSE, warning=FALSE}
+#PART II
+setwd("C:/Users/alpsr/Desktop/Homework 1/Data") # Please change your working directory after downloading the data from Google Trends
+
+#"Consumer Loans - Data collection and cleaning
+google_consloan <- read.csv("tuketici kredisi.csv", header = TRUE)
+google_consloan <- data.table(google_consloan)
+setnames(google_consloan, c("tuketici.kredisi...Turkey."), c("SearchVolume"))
+google_consloan[, "Week" := dmy(Week)]
+google_consloan[, "Month" := month(Week)]
+google_consloan[, "Year" := year(Week)]
+google_consloan[, "SearchVolume" := as.numeric(SearchVolume)]
+google_consloan[, "ConsumerLoanSV" := mean(SearchVolume), by = .(Month, Year)]
+google_consloan[, c("Week", "SearchVolume") := NULL]
+google_consloan <- unique(google_consloan)
+google_consloan[, "Date" := make_date(year = Year, month = Month, day = 15)]
+
+#Interest Rates - Data collection and cleaning
+google_interest <- read.csv("faiz oranlari.csv", header = TRUE)
+google_interest <- data.table(google_interest)
+setnames(google_interest, c("faiz.oranlari"), c("SearchVolume"))
+google_interest[, "Week" := dmy(Week)]
+google_interest[, "Month" := month(Week)]
+google_interest[, "Year" := year(Week)]
+google_interest[, "SearchVolume" := as.numeric(SearchVolume)]
+google_interest[, "InterestSV" := mean(SearchVolume), by = .(Month, Year)]
+google_interest[, c("Week", "SearchVolume") := NULL]
+google_interest <- unique(google_interest)
+google_interest[, "Date" := make_date(year = Year, month = Month, day = 15)]
+
+#Mortgages - Data collection and cleaning
+google_mortgage <- read.csv("konut kredisi.csv", header = TRUE)
+google_mortgage <- data.table(google_mortgage)
+setnames(google_mortgage, c("konut.kredisi...Turkey."), c("SearchVolume"))
+google_mortgage[, "Week" := dmy(Week)]
+google_mortgage[, "Month" := month(Week)]
+google_mortgage[, "Year" := year(Week)]
+google_mortgage[, "SearchVolume" := as.numeric(SearchVolume)]
+google_mortgage[, "mortgageSV" := mean(SearchVolume), by = .(Month, Year)]
+google_mortgage[, c("Week", "SearchVolume") := NULL]
+google_mortgage <- unique(google_mortgage)
+google_mortgage[, "Date" := make_date(year = Year, month = Month, day = 15)]
+
+#Job Postings - Data collection and cleaning
+google_jobs <- read.csv("is ilanlari.csv", header = TRUE)
+google_jobs <- data.table(google_jobs)
+setnames(google_jobs, c("is.ilanlari"), c("SearchVolume"))
+google_jobs[, "Week" := dmy(Week)]
+google_jobs[, "Month" := month(Week)]
+google_jobs[, "Year" := year(Week)]
+google_jobs[, "SearchVolume" := as.numeric(SearchVolume)]
+google_jobs[, "JobsSV" := mean(SearchVolume), by = .(Month, Year)]
+google_jobs[, c("Week", "SearchVolume") := NULL]
+google_jobs <- unique(google_jobs)
+google_jobs[, "Date" := make_date(year = Year, month = Month, day = 15)]
+
+```
+
+## Google Searches for Consumer Loans
+
+Search volumes data for the "Tüketici Kredisi" which is Turkish for consumer loans are used to understand the behavior of the net consumer loans given data. Search volumes and consumer loans data are positively correlated for most of the data. Especially, sharp increases and decreases in the loans data after the second half of 2018 are reflected in the search volumes. There is an increase in the second half of 2016 in the search volumes of the consumer loans. The magnitude of this increase is very large compared to the increase in the consumer loans.
+
+```{r Consumer Loans}
+ggplot(google_consloan, aes(x = Date, y = ConsumerLoanSV))+
+  geom_line()+
+  labs(title = "Google Searches for 'Tüketici Kredisi'", y = "'Tüketici Kredisi'", x = "Date")
+```
+
+To better understand the correlation between the two variables, below scatter plot can be used. As it can be seen in the scatter plot, there is a positive correlation between two variables.
+
+```{r message=FALSE}
+ggplot(google_consloan, aes(x = credit_table$NewCredit, y = ConsumerLoanSV))+
+  geom_point()+
+  geom_smooth(method = lm)+
+  labs(title = "Google Searches for 'Tüketici Kredisi' vs Consumer Loans", y = "'Tüketici Kredisi'", x = "Consumer Loans (m TL)")
+```
+
+## Google Searches for Interest Rates
+
+Search volumes for the keyword "faiz oranları" which is Turkish for interest rates are used to estimate the behavior of the interest rates data. As it can be seen from the line plot, the search volumes tend to increase during the periods of interest rate increases. Again, there is an unexplained increase in the search volumes in the second half of 2016 which was not reflected in the interest rate data.
+```{r message=FALSE}
+ggplot(google_interest, aes(x = Date, y = InterestSV))+
+  geom_line()+
+  labs(title = "Google Searches for 'Faiz Oranları'", y = "'Faiz Oranları'", x = "Date")
+```
+
+Scatter plot of two variables also show a positive correlation between them. However, data points are not equally spaced meaning there is a cluster of data points in the lower left side of the plot.
+
+```{r message=FALSE}
+ggplot(google_interest, aes(x = credit_table$CreditInterestRate, y = InterestSV))+
+  geom_point()+
+  geom_smooth(method = lm)+
+  labs(title = "Google Searches for 'Faiz Oranları' vs Interest Rates", y = "'Faiz Oranları'", x = "Interest Rates (%)")
+```
+
+## Google Searches for Mortgages
+
+Search volume for "Konut Kredisi" which is Turkish for mortgages is expected to be positively correlated with the house sales data. However, just by looking to the line plots of the two variables it is not easy to understand the correlation between them. However, one can observe that the increase in the search volume for mortgages that occurred in the mid-2019 is reflected in the house sales with a lag as it starts to rise after the second quarter.
+```{r}
+ggplot(google_mortgage, aes(x = Date, y = mortgageSV))+
+  geom_line()+
+  labs(title = "Google Searches for 'Konut Kredisi'", y = "'Konut Kredisi'", x = "Date")
+```
+
+Scatter plot of the mortgage searches and house sales data also fails to show a clear positive correlation. However, there is a small positive correlation, and the data seem to be dispersed around a constant level.  
+
+```{r message=FALSE}
+ggplot(google_mortgage, aes(x = credit_table$HouseSales, y = mortgageSV))+
+  geom_point()+
+  geom_smooth(method = lm)+
+  labs(title = "Google Searches for 'Konut Kredisi'", y = "'Konut Kredisi'", x = "House Sales (units)")
+```
+
+## Google Searches for Job Postings 
+
+Lastly, Google searches for job postings ("iş ilanı) should be positively correlated with the unemployment rate. Although , the increase in the unemployment in the late 2016 was not reflected clearly in the Google searches, Google searches move closely with the unemployment rate. 
+```{r}
+ggplot(google_jobs, aes(x = Date, y = JobsSV))+
+  geom_line()+
+  labs(title = "Google Searches for 'İş İlanları'", y = "'İş İlanları'", x = "Date")
+```
+
+Scatter plot clearly shows the positive correlation between the variables. There is a clear positive relation between the unemployment rate and Google searched for job postings.
+
+```{r message=FALSE}
+ggplot(google_jobs, aes(x = credit_table$UnemploymentRate, y = JobsSV))+
+  geom_point()+
+  geom_smooth(method = lm)+
+  labs(title = "Google Searches for 'İş İlanları'", y = "'İş İlanları'", x = "Unemployment (%)")
+```
+
+
+# Conclusion
+
+All in all, the use of economics statistics to explain the changes in the net consumer loans given can produce accurate results. Especially, interest rates and housing sales is a good estimator for the consumer loans. On the other hand, Google searches also provide a good insight into some of the economic statistics. Positive correlations between the unemployment and searches for "job postings", consumer loans and its Google searches are clear.

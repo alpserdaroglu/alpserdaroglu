@@ -1,0 +1,227 @@
+---
+title: "Homework 1"
+author: "Alp Serdaroğlu"
+date: "06/05/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+In this analysis, we are trying to construct a forecasting model for the price levels of clothing and footwear in Turkey. The target variable that will be predicted is the CPI for Clothing and Shoes. The data are published monthly by the Central Bank of Republic of Turkey.
+
+First, we will start of our analysis with the descriptive analysis of the target variable. Then, we will continue to build a time series regression model for predicting the price level of clothes and shoes. In the regression analysis aside from the variables for trend and seasonality, additional regressors will be evaluated. They will be included in the model if they are found useful.
+
+Initially in the regression analysis only time related variables will be included in the model. Then, external regressors will be added to the model. Finally, we will try to include autoregressive variables to the model to further decrease the autocorrelation in the residuals.
+
+The date required in the analysis is imported using the EVDS package. Time period of analysis is between November 2008 and March 2021. In the end, we are going to use our model to predict the CPI for Clothing and Shoes for April 2021.
+
+As potential regressors, interest rates, US Dollar vs Turkish Lira exchange rate, consumer confidence index and producer price indices for apparel and shoes are selected. First, interest rates can be correlated with the prices as consumers tend to spend more when the interest rates are low as opportunity cost of not earning interest from bank accounts decreases. Second, USDTRY exchange rate may influence the prices of clothes and shoes since import prices will be sensitive to the changes in the exchange rate. Third, consumer confidence index can be a good proxy for the demand for consumption goods. As the confidence level increases, consumers tend to save less and consume more. Finally, producer price indices can be used to estimate the consumer price index as the costs of production will be reflected in the prices of the goods.
+
+# Analysis
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(EVDS)
+library(lubridate)
+library(ggplot2 )
+library(ggcorrplot)
+library(skimr)
+library(data.table)
+library(corrplot)
+library(GGally)
+library(forecast)
+set_evds_key("O05EUMEwx4")
+```
+```{r}
+data <- get_series(c("TP.FG.J03", "TP.DK.USD.A.YTL", "TP.KTF17", "TP.TUFE1YI.T35", "TP.TUFE1YI.T40", "TP.TG2.Y01"),
+                   start_date = "31-10-2008", end_date = "31-03-2021")
+
+raw_data <- data.table(data$items)
+setnames(raw_data, c("TP_FG_J03", "TP_DK_USD_A_YTL", "TP_KTF17", "TP_TUFE1YI_T35", "TP_TUFE1YI_T40", "TP_TG2_Y01"),
+         c("PriceIndex", "USDTRY", "Interest", "PPIApparel", "PPIShoes", "CCI"))
+
+raw_data$Tarih <- as.Date(as.POSIXct(as.numeric((raw_data$UNIXTIME)), origin = "1970-01-02"))
+raw_data$Tarih <- ymd(raw_data$Tarih)
+raw_data[,"Year" := year(Tarih)]
+raw_data[,"Month" := as.character(lubridate::month(Tarih, label = T))]
+
+raw_data[,"PriceIndex" := as.numeric(PriceIndex)]
+raw_data[,"USDTRY" := as.numeric(USDTRY)]
+raw_data[,"Interest" := as.numeric(Interest)]
+raw_data[,"PPIApparel" := as.numeric(PPIApparel)]
+raw_data[,"PPIShoes" := as.numeric(PPIShoes)]
+raw_data[,"CCI" := as.numeric(CCI)]
+raw_data[,"Month" := as.factor(Month)]
+
+cloth_cpi <- raw_data[1:150,c("Tarih", "Year", "Month", "PriceIndex", "Interest",
+                              "PPIApparel", "USDTRY", "PPIShoes", "CCI")]
+```
+## Descriptive Analysis
+
+In this section we analyze the time series data before starting to build our forecasting model.
+
+#### Time Series Data
+```{r}
+ggplot(cloth_cpi, aes(x = Tarih)) + 
+  geom_line(aes(y = PriceIndex, color = 'Price Index')) +
+  labs( x = "Date", y = "CPI for Clothing and Shoes")
+```
+
+The above graph displays the time series for the CPI of Clothes and Shoes is plotted. The data shows an increasing trend combined with a yearly seasonality. Price levels are affected considerably by the month of the year. Also, variance of the series seems to be increasing as time progresses.
+
+#### Mean and Standard Deviation of the CPI for Clothing and Footwear
+
+```{r}
+cloth_cpi[,mean(PriceIndex), by=Month]
+```
+
+To have a better understanding of the seasonality in the data, means of the CPI based on the month are examined. Months of November and May have the highest average price level as they are the beginning of the season for winter and summer clothes respectively.
+
+Also, in the table below, standard deviation of the price index based on the year is displayed. The standard deviation of the data is not constant and tend increase between 2009 and 2018. This can affect the performance of our model negatively as linear regression assumes variance of the target variable to be constant.
+```{r}
+cloth_cpi[, sd(PriceIndex), by=Year]
+```
+
+#### Correlations
+
+After examining the target variable, we continue with our analysis of the correlations of the potential regressors. Based on the plot below, we can see that our target variable "PriceIndex" have relatively high correlations with producer price indices, exchange rates and consumer confidence index. Interest Rates tend to have a relative smaller correlation compared to other variables. Also, PPI for shoes and apparel are also highly correlated. Thus, PPI for shoes will not be used in our analysis to avoid multicollinearity. Furthermore, the data for consumer price index is only available after 2012. Thus, in order not to decrease the number of data points we have and lose a lot of degree of freedoms, it will not be used in the analysis. In conclusion, exhchange rates and PPI for Apparel will be used in the analysis.
+```{r warning=FALSE}
+ggpairs(cloth_cpi[, c("PriceIndex", "Interest", "PPIApparel", "USDTRY", "PPIShoes", "CCI")])
+```
+
+#### Autocorrelations and Cross-Correlations
+
+As our aim is to predict the future variables, we need to use lagged variables in our analysis. The data for our regressors will also not be available for the periods that we want to forecast. Thus, we have analyzed the cross-correlations between our regressors and target variable to determine the lags that we are going to use.
+```{r}
+pacf(cloth_cpi$PriceIndex)
+```
+
+In the above table, partial autocorrelations for our target variable displayed. Correlation with lag equals to one has the highest value. Thus, an autoregressive variable with lag one can be included in our model if needed.
+```{r}
+ccf(cloth_cpi$PriceIndex, cloth_cpi$USDTRY)
+```
+
+```{r}
+ccf(cloth_cpi$PriceIndex, cloth_cpi$PPIApparel)
+```
+
+In the above graphs, price index data is correlated with the exchange rate and produced price index when lag equals to one. Thus, in our model, exchange rate and PPI data from the previous month (lag = 1) will be used. 
+
+## Linear Regression with Trend Variable
+
+Our analysis begin with the most simple linear regression model which only includes the trend variable as regressor.
+```{r}
+cloth_cpi[, PPIApparelLag1 := shift(PPIApparel)]
+cloth_cpi[, USDTRYLag1 := shift(USDTRY)]
+cloth_cpi[, PriceIndexLag1 := shift(PriceIndex)]
+cloth_cpi[, InterestLag1 := shift(Interest)]
+cloth_cpi[, PPIShoesLag1 := shift(PPIShoes)]
+cloth_cpi[, CCILag1 := shift(CCI)]
+
+cloth_cpi <- cloth_cpi[-1]
+cloth_cpi[, "Trend" := 1:.N]
+
+ts_reg_trendonly = lm(PriceIndex~Trend,cloth_cpi)
+summary(ts_reg_trendonly)
+cloth_cpi[, "TrendOnly" := predict(ts_reg_trendonly, cloth_cpi)]
+```
+
+Based on the summary table above, we can say that the R-squared value of the model is good and our model seems to explain most of the variance in the data. However, further analysis shows that our model tend to create large residuals in its predictions as it can be seen from the graph below.
+```{r}
+ggplot(cloth_cpi, aes(x = Tarih)) + 
+  geom_line(aes(y = PriceIndex, color = 'Price Index'))+
+  geom_line(aes(y = TrendOnly, color = 'Trend'))
+```
+
+```{r}
+ggplot(cloth_cpi, aes(x = Tarih)) +
+  geom_line(aes(y = PriceIndex - TrendOnly)) +
+  labs(y = "Residuals", x = "Date")
+```
+
+Another important analysis is to check the residuals and observe that whether their mean is around zero with constant variance and they are not autocorrelated. Above graph clearly shows that the residuals are greater in the start and beginning of the time series. Also, the residuals have seasonality suggesting that we need to account for the seasonality in the data.
+
+## Linear Regression with Trend and Seasonal Variables
+
+At this stage of our analysis, we add dummy variables for the years of the month to account for the seasonality in the data. The results for the linear regression model including trend and month variables can be seen below.
+```{r}
+ts_reg_trendmonth = lm(PriceIndex~Trend + Month,cloth_cpi)
+summary(ts_reg_trendmonth)
+cloth_cpi[, "TrendMonth" := predict(ts_reg_trendmonth, cloth_cpi)]
+```
+
+When dummy variables for months are included, adjusted R-squared value improves considerably and increases to 0.96. This shows that the model explains most of the variance in the data. Also, compared to previous model, residual standard error decreased considerably proving that this model outperforms the previous model. In the below graph, predicted values and real values are plotted against time.
+```{r}
+ggplot(cloth_cpi, aes(x = Tarih)) + 
+  geom_line(aes(y = PriceIndex, color = 'Price Index'))+
+  geom_line(aes(y = TrendMonth, color = 'Predictions'))
+```
+
+However, the model fails to remove the correlation in the residuals as it can be seen from the below graph. Residuals tend to have a higher variance as the time progresses. Also, they are not randomly distributed around zero. The model fails to satisfy the assumptions about the residuals in linear regression. Thus, it is clear that we need additional regressors to get rid of the correlation in the residuals.
+```{r}
+ggplot(cloth_cpi, aes(x = Tarih)) +
+  geom_line(aes(y = PriceIndex - TrendMonth)) +
+  labs( x = "Date", y = "Residuals")
+```
+
+## Linear Regression with Additional Regressors
+
+At this stage of the analysis, two additional regressors are added to our model. The two regressors are USD vs TRY exchange rate and produced price index for apparel. For both regressors data from the previous month is used (lag=1) as they both have the highest cross-correlation with the target variable when lag equals to one. Result of this linear regression model can be seen below.
+```{r}
+ts_reg_usdppi = lm(PriceIndex~Trend+Month+PPIApparelLag1+USDTRYLag1, cloth_cpi)
+summary(ts_reg_usdppi)
+```
+
+Compared to previous model adjusted r-squared value increased slightly to 0.99. Also, residual standard error decreased to 4.68 from 9.02. There is a slight improvement to our model. However, assumptions about the residuals should also be analyzed.
+```{r}
+checkresiduals(ts_reg_usdppi, lag = 12)
+cloth_cpi[, "AddReg" := predict(ts_reg_usdppi, cloth_cpi)]
+```
+
+Based on the output above about the residuals, we can conclude that the residuals are randomly distributed around mean zero. However, their variance is not constant. Variance of the residuals increases in the last part of the time series. Also, autocorrelation function shows that the residuals have autocorrelation especially when lag equals to one. Lastly, the p-value in the Breusch-Godfrey is very small suggesting that there is an autocorrelation in the residuals.
+```{r}
+ggplot(cloth_cpi, aes(x = Tarih)) + 
+  geom_line(aes(y = PriceIndex, color = 'Price Index'))+
+  geom_line(aes(y = AddReg, color = 'Trend'))+
+  labs( x = "Date", y = "CPI for Clothing and Shoes")
+```
+
+Although our model seems to produce predictions pretty close to the real observations, the residuals are correlated with each other. This means that our model fails to satisfy the basic assumptions of the linear regression. One way to improve our model is to include autoregressive variables to the model which will be done in the next section.
+
+## Linear Regression with Lagged Variable
+
+In this section we add autoregressive variable of lag one to our model.
+```{r}
+ts_reg_auto = lm(PriceIndex~Trend+Month+PPIApparelLag1+USDTRYLag1+PriceIndexLag1, cloth_cpi)
+summary(ts_reg_auto)
+```
+
+When the value of price index from the previous month is added as a regressor, our model improves slightly compared to the previous version of our model. Adjusted R-squared value improves slightly. Also, residual standart error decreases to 3.01 compared to 4.68 in the previous model.
+
+To see whether the residuals satisfies the assumptions, we can use the below graphs. Although, residuals are distributed around zero with an approximately normal distribution, our model again fails to produce residuals without autocorrelation. As the p-value for the Breusch-Godfrey test is very small there is a strong enough evidence that there is an autocorrelation in the residuals. However, when compared with the previous model, p-value for this test improved considerably.
+```{r}
+checkresiduals(ts_reg_auto, lag = 12)
+cloth_cpi[, "V5Predict" := predict(ts_reg_auto, cloth_cpi)]
+```
+
+Although, our model fails to satisfy the linear regression assumptions, we tend to produce predictions that are close to real observations as it can be seen from the below graph.
+```{r}
+ggplot(cloth_cpi, aes(x = Tarih)) + 
+  geom_line(aes(y = PriceIndex, color = 'Price Index'))+
+  geom_line(aes(y = V5Predict, color = 'Trend'))+
+  labs( x = "Date", y = "CPI for Clothing and Shoes")
+```
+
+# Conclusion
+
+In conclusion, time series regression model that we constructed to forecast the consumer price index for clothing and shoes seems to performing well based on the adjusted R-squared values. However, our different versions of the model fails to satisfy the assumptions about the residuals. Residuals in our models have autocorrelation with contradicts with model assumptions. This can mean that there are some omitted variables which explain the autocorrelation in the residuals. For future analysis, we can try to find an additional regressor that will remove the autocorrelation of the residuals.
+
+To test the performance of our model, we can compare our predictions with the real observation of April 2021. CPI for clothes and shoes for April 2021 is 274.23.
+
+Our fourth model's ("Linear Regression with Additional Regressors") prediction for April 2021 is 271.12. On the other hand our fifth model's ("Linear Regression with Lagged Variables") prediction is 271.45. Both models' predictions are very close to each other. Overall, although, some of the model assumptions are not satisfied, the model produces close predictions. However, using these models as they are, can lead to misleading results as some of the assumptions are not satisfied.

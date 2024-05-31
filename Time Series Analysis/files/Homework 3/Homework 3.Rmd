@@ -1,0 +1,308 @@
+---
+title: "Homework 3"
+author: "Alp Serdaroğlu"
+date: "6/2/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Introduction
+
+EPİAŞ (Enerji Piyasaları İşletme A.Ş.) is the responsible body for managing the energy markets in Turkey. Hourly data for electricity consumption are made publicly available through their [transparency platform](https://seffaflik.epias.com.tr/transparency/). Aim of this analysis is to analyze the consumption data and build and compare several forecasting models about the hourly electricity consumption of Turkey. Time Series used is under the realized consumption tab and called [real-time consumption](https://seffaflik.epias.com.tr/transparency/tuketim/gerceklesen-tuketim/gercek-zamanli-tuketim.xhtml).
+
+Models are trained using the data between January 1st, 2016 and May 5th, 2020. Then, forecasts for the next 14-day period are generated. Models' performances during this period are compared using difference performance metrics.
+
+# Part A - Seasonality
+
+After importing the data, initial visual analysis of the time series show that the time series have both trend and seasonality. Consumption data may consist different seasonal patterns. Daily, weekly, monthly and yearly seasonality can be present in the time series.
+
+```{r message=FALSE, warning=FALSE}
+
+library(data.table)
+library(ggplot2)
+library(lubridate)
+library(forecast)
+library(urca)
+
+raw_data <- read.csv("C:/Users/alpsr/Desktop/Homework 3/RealTimeConsumption-01012016-20052021.csv")
+raw_data <- data.table(raw_data)
+
+raw_data[, 'Date' := dmy(Date)]
+raw_data[, 'Day' := lubridate::wday(Date, label = TRUE)]
+raw_data[, 'Month' := lubridate::month(Date, label =TRUE)]
+raw_data[, 'Hour' := hour(hm(Hour))]
+setnames(raw_data, "Consumption..MWh.", "Consumption")
+raw_data[, 'Consumption' := gsub(",","", Consumption)]
+raw_data[, 'Consumption' := as.numeric(Consumption)]
+
+ggplot(raw_data, aes(x = Date))+
+  geom_line(aes(y = Consumption, color = 'Blue'))
+```
+
+To analyze the seasonal patterns are different levels, the data is decomposed based on different time intervals.
+
+## Daily Seasonality
+
+First, data is decomposed on a daily level to analyze whether the data displays a seasonal pattern based on the hour of the day. In the plot below, average consumption values vs. the hour of the day for different years are plotted.There is a clear seasonal pattern in each year where the consumption reaches its highest values first at 10 AM and then at 20 PM.
+
+```{r}
+hour_avg <- raw_data[,list(AvgCons = mean(Consumption)), by = .(year(Date), Hour)]
+ggplot(hour_avg, aes(x = Hour))+
+  geom_line(aes(y = AvgCons, group = factor(year), color = factor(year)))
+
+```
+
+In the plot below, we can see the distribution of consumption values based on the time of the day. Seasonal patterns are apparent in the series. Also, the variance of the data differs based on the time of the day which contradicts with constant variance assumption.
+
+```{r}
+dailyts = ts(raw_data$Consumption, freq = 24)
+dailyts_short <- ts(dailyts[1:1200], freq = 24)
+monthplot(dailyts_short)
+```
+
+At this stage we decompose the data based on daily seasonality. Trend component still displays some seasonal behavior suggesting that there are some seasonal patterns that are unaccounted for in the data. Mean of the random component is close to zero. Also, random component seems to follow a white noise series. Variance of these series is mostly constant, although it gets larger in certain periods.
+
+```{r}
+daily_dec <- decompose(dailyts)
+plot(daily_dec)
+```
+
+## Weekly Seasonality
+
+Second, data is decomposed on a weekly level to analyze whether the data displays a seasonal pattern based on the day of the week. In the plot below, average consumption values vs. the day of the week for different years are plotted.There is a clear seasonal pattern in each year where the consumption reaches its highest values during the weekday especially on Wednesdays and Thursdays.
+
+```{r}
+day_avg <- raw_data[,list(AvgCons = mean(Consumption)), by = .(year(Date), Day)]
+ggplot(day_avg, aes(x = Day))+
+  geom_line(aes(y = AvgCons, group = factor(year), color = factor(year)))
+```
+
+After decomposing the series, we see that the trend component displays less seasonal patterns compared to previous decomposition. However, there are still some seasonal effect causing consumption to rise towards the third quarter. Mean of the random component is close to zero. Also, random component seems to follow a white noise series. Variance of these series is mostly constant. However, there are some relatively large error values. These are most likely due to national and religious holidays.
+
+```{r}
+weeklyts = ts(raw_data$Consumption, freq = 168)
+weekly_dec <- decompose(weeklyts)
+plot(weekly_dec)
+```
+
+## Monthly Seasonality
+
+Third, data is decomposed on a monthly level to analyze whether the data displays a seasonal pattern based on the day of the month. In the plot below, average consumption values vs. the day of the month for different years are plotted. There are no clear seasonal patterns visible as it can be seen below.
+
+```{r}
+month_avg <- raw_data[,list(AvgCons = mean(Consumption)), by = .(year(Date), day(Date))]
+ggplot(month_avg, aes(x = day))+
+  geom_line(aes(y = AvgCons, group = factor(year), color = factor(year)))
+```
+
+After decomposing the series, we see that the trend component displays seasonal patterns suggesting that the seasonal component fails to account for the seasonal effect. Random component does not look like a white noise series. Random component tends to have negative values in regular intervals. Thus, resulting random component is not stationary.
+
+```{r}
+monthlyts = ts(raw_data$Consumption, freq = 720)
+monthly_dec <- decompose(monthlyts)
+plot(monthly_dec)
+```
+
+## Yearly Seasonlity
+
+Lastly, data is decomposed on a yearly level to analyze whether the data displays a seasonal pattern based on the month of the year. In the plot below, average consumption values vs. the month of the year for different years are plotted. There is a seasonal pattern in each year where the consumption reaches its highest values in July, August and December.
+
+```{r}
+yrmo_avg <- raw_data[,list(AvgCons = mean(Consumption)), by = .(year(Date), Month)]
+ggplot(yrmo_avg, aes(x = Month))+
+  geom_line(aes(y = AvgCons, group = factor(year), color = factor(year)))
+```
+
+After decomposing the series, we see that the trend component displays no seasonal patterns. This suggests that trend component contain no seasonal effect. Mean of the random component is close to zero. Random component does not look like a white noise series. Random component tends to have negative values in regular intervals. Thus, resulting random component is not stationary. This can be seen below from the result of the unit root test. Series is not stationary even when alpha equals to 2.5%.
+
+```{r}
+yearlyts = ts(raw_data$Consumption, freq = 8760)
+yearly_dec <- decompose(yearlyts)
+plot(yearly_dec)
+summary(ur.kpss(yearly_dec$random))
+```
+
+# Part B - Decomposition
+
+When the consumption series are analyzed using the below plots, we see that the autocorrelations of the series display a sinusodial pattern. On the other hand, partial autocorrelations display spikes at certain lags. Although, the data is not stationary yet, this suggests the series has an autoregressive signature.
+
+```{r}
+cons <- ts(raw_data$Consumption, frequency = 168)
+tsdisplay(cons)
+```
+
+In this part, we decompose the data based on the weekly seasonality. In other words, we believe that there is a seasonal pattern in every 168 hours.
+
+```{r}
+cons_dec <- decompose(cons, type = 'additive')
+plot(cons_dec)
+```
+
+Results of the unit-root test suggest that the data is stationary since the value of the test statistic is smaller than the critical values. Also, the random component is similar to a white noise series with zero mean and constant variance. Although, the data is not completely stationary since there are some extreme values due to the effects of the special days lihe national holidays.
+
+```{r}
+random <- cons_dec$random
+ts.plot(random)
+test_stat <- ur.kpss(random, use.lag = 168)
+summary(test_stat)
+```
+
+Autocorrelations of the random component displays a sinusodial behavior with a period of 24. Partial autocorrelation function spikes at certain values. This suggests that the autoregressive components will work best in forecasting this series. Although, partial autocorrelation spikes when lag is equal to the multiple of 24. Thus, seasonal differencing or seasonal arima models can be used to eliminate this seasonal effect.
+
+```{r}
+acfs <- acf(random, na.action = na.pass, lag.max = 336)
+pacfs <- pacf(random, na.action = na.pass, lag.max = 336)
+```
+
+# Part C - Autoregressive Models
+
+To determine the number of autoregressive components to use, partial autocorrelations are analyzed. Parital autocorrelation of the detrended and deaseasonalized series is very large in the first two lags. However, the pacf continues to be significant as lag increases. Thus, autoregressive models with up to 4 lags will compared with each other.
+
+##### p = 1
+```{r}
+ar1 <- arima(random, order = c(1,0,0))
+AIC(ar1)
+```
+##### p = 2
+```{r}
+ar2 <- arima(random, order = c(2,0,0))
+AIC(ar2)
+```
+##### p = 3
+```{r}
+ar3 <- arima(random, order = c(3,0,0))
+AIC(ar3)
+```
+##### p = 4
+```{r}
+ar4 <- arima(random, c(4,0,0))
+AIC(ar4)
+```
+
+AIC values decrease as the p parameter increases. Since the autoregressive model with 4 terms has the lowest AIC value, it will be selected as an alternative.
+
+# Part D - Moving Average Models
+
+Five different MA models are compared with each other to determine the model with best AIC value.
+
+##### q = 1
+```{r}
+ma1 <- arima(random, order = c(0,0,1))
+AIC(ma1)
+```
+##### q = 3
+```{r}
+ma2 <- arima(random, order = c(0,0,2))
+AIC(ma2)
+```
+##### q = 3
+```{r}
+ma3 <- arima(random, order = c(0,0,3))
+AIC(ma3)
+```
+##### q = 4
+```{r}
+ma4 <- arima(random, order = c(0,0,4))
+AIC(ma4)
+```
+##### q = 5
+```{r}
+ma5 <- arima(random, order = c(0,0,5))
+AIC(ma5)
+```
+
+As the q parameter increases, AIC value improves. However, building a model require higher computational effort as q increases. Thus, we limit ourselves to q = 5. Since the moving average model with q = 5 has the lowest AIC value, it will be selected as an alternative.
+
+# Part E - Comparing Models
+
+After selecting two different alternatives, one AR and one MA model, their performances are evaluated during a test period which is between May 6, 2021 and May 20, 2021. Models are trained using the data between January 1, 2016 and May 5, 2016.
+
+First, trend and seasonal components need to be forecasted to before generating forecasts for the electricity consumption. Forecasts for these components are calculated recursively. After separating the data into training and testing parts, training data is decomposed. Then, forecasts for the next day are generated. Trend components is estimated to be equal to its last available value which is from 85 observations before. Since the seasonal pattern's length equals to 168 and trend component calculated using a symmetric moving average, last 84 values are not available. Whereas, the seasonal component is estimated as the last value of the same period which is from 168 observations before.
+
+After estimating the trend and seasonal components, forecasts for the random component are generated. While generating these forecasts, models are not trained as the new data becomes available since doing so would require a lot of computational effort. Finally, forecasts for the trend, seasonal and random components are added together to generate the predictions for the electricity consumption.
+
+Performance of the models are measured using different metrics. As it can be seen below, metrics for the both models are very close to each other. Both models, has a negative bias, suggesting that they tend to overpredict. Although, metrics are very close to each other, AR model performs slightly better. Its mean absolute percentage error, root mean squared error and mean absolute deviation are better than the MA model. Finally, AR model has a better weighted mean absolute percentage error compared to MA model which are 10.7983% and 10.8112% respectively.
+
+```{r}
+
+raw_data[,Trend := 0]
+raw_data[,Seasonal := 0]
+
+train <- ts(raw_data[Date <= '2021-05-05', Consumption], frequency = 168)
+
+test <- ts(raw_data[Date >= '2021-05-06', Consumption], frequency = 168)
+testdata <- raw_data[Date >= '2021-05-06',]
+
+#testdata[,"Trend" := 0]
+#testdata[,"Seasonal" := 0]
+dec <- decompose(train)
+rem <- dec$random
+
+MA <- arima(rem, order = c(0,0,5))
+AR <- arima(rem, order = c(4,0,0))
+
+row <- 46848
+for(i in seq(1,360)){
+  tra <- ts(raw_data[1:(row+i-1), Consumption], frequency = 168)
+  #tes <- ts(raw_data[(row+i):47208, Consumption], frequency = 168)
+  
+  dec <- decompose(tra)
+  rem <- dec$random
+  
+  testdata[i, Trend := tail(dec$trend[!is.na(dec$trend)],1)]
+  testdata[i, Seasonal := dec$seasonal[length(dec$seasonal)-167]]
+
+}
+
+ARf <- Arima(tail(rem[!is.na(rem)],5), model = AR)
+MAf <- Arima(rem[!is.na(rem)], model = MA)
+
+testdata[,'AR_random' := forecast(ARf, h = 360)$mean]
+testdata[,'MA_random' := forecast(MAf, h = 360)$mean]
+
+#testdata[,'AR_random' := forecast(ARf, h = 360)$mean]
+#testdata[,'MA_random' := forecast(MAf, h = 360)$mean]
+#setnames(testdata, c("AR_error", "MA_error"), c("AR_random", "MA_random"))
+
+testdata[,'AR_forecast' := Trend+Seasonal+AR_random]
+testdata[,'MA_forecast' := Trend+Seasonal+MA_random]
+
+accu=function(actual,forecast){
+  n=length(actual)
+  error=actual-forecast
+  mean=mean(actual)
+  #sd=sd(actual)
+  #CV=sd/mean
+  FBias=sum(error)/sum(actual)
+  MAPE=sum(abs(error/actual))/n
+  RMSE=sqrt(sum(error^2)/n)
+  MAD=sum(abs(error))/n
+  MADP=sum(abs(error))/sum(abs(actual))
+  WMAPE=MAD/mean
+  l=data.frame(n,mean,FBias,MAPE,RMSE,MAD,MADP,WMAPE)
+  return(l)
+}
+
+```
+
+Performance Metrics for AR (p = 4) Model:
+
+```{r}
+accu(testdata$Consumption,testdata$AR_forecast)
+```
+
+Performance Metrics for MA (q = 5) Model:
+
+```{r}
+accu(testdata$Consumption,testdata$MA_forecast)
+```
+
+# Conclusion
+
+In this analysis, we have built various models to predict the hourly electricity consumption of Turkey. First, we have tried to get a stationary time series. After trying several different decompositions, time series have become stationary. Although, it was able to pass the unit root tests, its autocorrelation and partial autocorrelation values were still significant. Then, alternative models are chosen and their performances was tested. AR model with parameter p = 4 was the best-performing model. However, since the acf and pacf values remains significant use of seasonal arima models or seasonal differencing can generate better predictions.
