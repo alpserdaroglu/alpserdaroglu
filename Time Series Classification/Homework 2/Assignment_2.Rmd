@@ -1,0 +1,358 @@
+---
+title: "Homework 1"
+author: "Alp Serdaroğlu"
+date: "11/4/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+```{r message=FALSE, warning=FALSE}
+setwd("C:/Users/alpsr/Desktop/IE 48B Assignment 2/CBF")
+library(data.table)
+library(ggplot2)
+library(genlasso)
+library(rpart)
+library(rattle)
+
+WidetoLong <- function(x){
+  long_x <- melt(x, id.vars = c('ID', 'Class'))
+  return(long_x)
+}
+```
+
+Cylinder-Bell-Funnel data set consists of 30 time series which are classified into three different classes, cylinder, bell and funnel. Our aim is to create a time series representation that will be used in time series classification setting. In this analysis, one dimensional fused lasso method and piecewise adaptive constant approximations using regression trees will be used. Then, the mean squared errors of the two methods will be compared and their performance in classifying the time series in the training data set will be evaluated.
+
+In the first part of our analysis, data is imported and manipulated into desired format. The structure of the CBF dataset is as follows.
+
+```{r message=FALSE, warning=FALSE}
+setwd("C:/Users/alpsr/Desktop/IE 48B Assignment 2/CBF")
+raw_data <- read.table("CBF_Train.txt", header = F ,
+                       na.strings ="", stringsAsFactors= F)
+raw_data <- setnames(raw_data, "V1", "Class")
+raw_data <- data.table(raw_data)
+raw_data[, "ID" := 1:.N]
+
+setcolorder(raw_data, c("ID", "Class"))
+cbf <- raw_data
+cbf_long <- WidetoLong(raw_data)
+cbf_long[,variable := as.numeric(gsub('V','',variable))-1]
+
+head(round(cbf,2))
+```
+
+### Class 1: Cylinder
+
+The data set contains three different classes. First of the classes is cylinder. One instance of this class is displayed below.
+
+```{r}
+ggplot(cbf_long[ID == 1])+
+  geom_point(aes(x = variable, y = value))
+```
+
+### Class 2: Bell
+
+Second class is the bell class which displays a steady increase before a sudden decrease late in the series as displayed below.
+
+```{r}
+ggplot(cbf_long[ID == 5])+
+  geom_point(aes(x = variable, y = value))
+```
+
+### Class 3: Funnel
+
+The last class is the funnel class which displays a sudden increase early in the series which is followed by a steady decrease as displayed below.
+
+```{r}
+ggplot(cbf_long[ID == 4])+
+  geom_point(aes(x = variable, y = value))
+```
+
+# Tasks 1 & 2 - Time Series Representations
+
+In this part of the analysis, two different representations of the CBF data set are created. 1D-Fused Lasso method is used to create the first representation whereas the second representation is created using the regression trees.
+
+## Task 1 - 1D Fused Lasso
+
+For this task genlasso package in R is used to perform the representation. For each series, a representation is calculated using different values of lambda. Lambda parameter in the 1D Fused Lasso is the penalty assigned to the difference between two consecutive points of the representation. Thus, this method aims to achieve a representation in which the changes between the consecutive representation values are as small as possible.
+
+To determine the best value for the lambda for each series, several observations are removed from the series as the test set. Then, the model is fitted on the remaining values and tested on the remaining points. For this analysis, every 10 points is removed from the observation. Then the model is fitted and tested for different lambda values. This procedure is repeated for 10 different sets of test points. This is acheieved by using the trendfilter and cv.trendfilter functions in the genlasso package. Other than the genlasso package two R functions created to run 1D Fused Lasso for a given series ID and k value (10 in our case).
+
+The best lambda values for each time series are given below.
+
+```{r}
+setwd("C:/Users/alpsr/Desktop/IE 48B Assignment 2/CBF")
+load("Workspace_Assignment_2.RData")
+lasso[[1]]
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+FusedLasso1D <- function(dataset, id){
+  
+  # Getting the time series
+  trial = dataset[id,c(-1,-2)]
+  trial
+  out = trendfilter(unlist(trial), ord = 0)
+  cv = cv.trendfilter(out, k = 10, verbose = FALSE)
+  
+  minlambda = cv$lambda.min
+  minlambdaindex = which(out$lambda == cv$lambda.min)
+  fitted = out$fit[,minlambdaindex]
+  
+  ret <- list(minlambda, fitted)
+
+  return(ret)
+}
+
+RunFusedLasso1D <- function(dataset, k){
+  
+
+  FittedValues <- data.table()
+  Lambda <- 0
+  
+  for(i in seq(1,30)){
+    
+    out <- 0
+    out <- FusedLasso1D(dataset,i)
+    
+    FittedValues <- rbind(FittedValues, t(unlist(out[2])))
+    Lambda[i] <- unlist(out[1])
+    
+  }
+  
+  ret <- list(Lambda, FittedValues)
+  
+  return(ret)
+  
+}
+
+lasso <- RunFusedLasso1D(cbf, 10)
+lasso[[1]]
+```
+
+An example plot of the real time series and fitted model is as follows.
+
+```{r}
+plot_real <- unlist(cbf[1,-c("ID","Class")])
+plot_fit_lasso <- unlist(lasso[[2]][1,])
+plot_lasso <- data.frame(seq(1,128),plot_fit_lasso, plot_real)
+
+ggplot(plot_lasso)+
+  geom_line(aes(x = seq.1..128., y = plot_fit_lasso, color = '1D Fused Lasso Fit'), size = 1)+
+  geom_line(aes(x = seq.1..128., y = plot_real, color = 'Real Series'), size = 1)+
+  labs(x = 'Time', y = 'Values', title = 'Real vs Fitted Values (1D Fused Lasso)', colour = 'Legend')
+```
+
+Finally, representation for the first seven time series are as follows:
+
+```{r}
+head(lasso[[2]])
+```
+## Task 2 - Regression Trees
+
+The second representation method used in this analysis is the Regression Trees. In this method, the data is recursively divided into "leaves" whose means minimized the overall sum of squared errors. Complexity of the regression tree represenation are controlled using several different parameters such as minimum number of points in a node, minimum number of points in a node to be considered for a split, complexity parameter and maximum depth of the tree. For this analysis, minbucket is set to 10 and minsplit is set to 20. Also, complexity parameter is set to zero. Only remaining parameter value to be decided is the maximum depth of the tree. In this analysis, maximum depths of 1, 2, 3, and 4 are considered for each series.
+
+Similar to the previous task, several observations are left out of the training set to be used in the test set. First, one point is chosen from every ten points to be removed from the set. Then, the model is trained and tested and the total error of the representation is calculated. This process is done for 10 different sets of test points. To illustrate, first set of test points which are used is observations at t = 1, 11, 21, 31, ..., 111 and the second set is t = 12, 22, 32, ..., 112. The final set to be used is the set of t = 10, 20, 30, ..., 120. To run this analysis two R functions are created which fits a regression tree to a given series and "cross validates" the fitted model for a given k value (10 in our case).
+
+This procedure produced the best maximum depths for 30 time series.
+
+```{r}
+regtree[[1]]
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+RegressionTrees <- function(dataset, id, k){
+  
+  series <- dataset[ID == id,]
+
+  # Forming the test indices
+  test_index = seq(1,120, by = k)
+  remove_index = -test_index # Indices to be removed
+  
+  error <- Matrix(0,nrow = 10, ncol = 4)
+  
+  for(i in seq(1,10)){
+    for(j in c(1,2,3,4)){
+      train = series[remove_index,] # Training Series
+      fit <- rpart(value~variable, train, control = rpart.control(cp = 0, minsplit = 20, minbucket = 10, maxdepth = j))
+      series[, predict := predict(fit, series)]
+      error[i,j] <- sum(series[variable %in% test_index,(value-predict)^2])
+    }
+    test_index = test_index + 1
+    remove_index = -test_index
+  }
+  
+  depth = colSums(error)
+  final_fit = rpart(value~variable, series, control = rpart.control(cp = 0, minsplit = 20, minbucket = 10, maxdepth = which.min(depth)))
+  
+  return(list(error,depth,which.min(depth),predict(final_fit,series)))
+}
+
+
+RunRegressionTrees <- function(dataset, k){
+  
+  BestDepth <- 0
+  Fitted <- matrix(,nrow = 30, ncol = 128)
+  Errors <- matrix(,nrow = 30, ncol = 4)
+  for(i in seq(1,30)){
+    fit <- RegressionTrees(dataset,i,k)
+    BestDepth[i] <- unlist(fit[3])
+    Fitted[i,] <- unlist(fit[4]) #rbind(Fitted, (unlist(fit[3])))
+    Errors[i,] <- unlist(fit[2]) #rbind(Errors, (unlist(fit[2])))
+  }
+  return(list(BestDepth, Fitted, Errors))
+}
+
+regtree <- RunRegressionTrees(cbf_long, 10)
+regtree[[1]]
+```
+
+An example plot of the real time series and fitted model is as follows.
+
+```{r}
+plot_real <- unlist(cbf[1,-c("ID","Class")])
+plot_fit_tree <- unlist(regtree[[2]][1,])
+plot_tree <- data.frame(seq(1,128),plot_fit_tree, plot_real)
+
+ggplot(plot_tree)+
+  geom_line(aes(x = seq.1..128., y = plot_fit_tree, color = 'Regression Tree Fit'), size = 1)+
+  geom_line(aes(x = seq.1..128., y = plot_real, color = 'Real Series'), size = 1)+
+  labs(x = 'Time', y = 'Values', title = 'Real vs Fitted Values (Regression Trees)', colour = 'Legend')
+```
+
+Finally, as an example, representation obtained for the time series with ID = 1 is as follows.
+
+```{r}
+example <- rpart(value~variable, cbf_long[ID == 1,], control = rpart.control(cp = 0, minsplit = 20, minbucket = 10, maxdepth = 3))
+fancyRpartPlot(example)
+```
+
+# Task 3 - Comparing Mean Square Errors
+
+In this part of our analysis, mean square errors of the two representation are compared with each other. To achieve this, each fitted model is compared with the original series both for 1D Fused Lasso and Regression Trees. While fitting the data, best model parameters which are obtained in the previous tasks are used. As a result two distributions of length 30 are obtained. Boxplot of the mean square errors is as follows.
+
+```{r}
+# MSE for the Lasso
+fitted_lasso <- as.matrix(lasso[[2]])
+real_series <- as.matrix(cbf[,-c("ID","Class")])
+squared_errors_lasso  <- (fitted_lasso - real_series)^2
+mse_lasso <- rowSums(squared_errors_lasso)/128
+
+# MSE for the Regression Trees
+fitted_trees <- as.matrix(regtree[[2]])
+#real_series <- as.matrix(cbf[,-c("ID","Class")])
+squared_errors_trees  <- (fitted_trees - real_series)^2
+mse_trees <- rowSums(squared_errors_trees)/128
+
+#Boxplot
+ID <- c(rep("1D Fused Lasso",times = 30),rep("Regression Trees",times = 30))
+MSE <- c(mse_lasso,mse_trees)
+df1 <- data.frame(ID, MSE)
+
+ggplot(df1,aes(y = MSE, fill = ID))+
+  geom_boxplot(aes(x = as.factor(ID)))+
+  labs(title = 'Boxplot of MSE values of two representations', x = 'Representation')
+```
+
+As it can be seen from the boxplot above, 1D Fused Lasso has a lower mean MSE compared to Regression Tree. Also, variance of the MSEs of 1D Fused Lasso is slightly lower than the Regression Trees. Finally, we can see that the both distributions are skewed towards the higher MSE values that is their distribution are do not resemble normal. 
+
+# Task 4 - Predictions
+
+In this part, prediction accuracy of the representations on the training set is compared with the prediction accuracy of the raw series. Distance between each time series are calculated using Euclidean Distance three time for raw time series, regression tree representations and 1D Fused Lasso representations. Then, using the distance matrix obtained, each class is classified using a 1-nearest neighbor classifier in which each class is assigned the class of its nearest neighbor.
+
+## Raw Time Series
+
+First, distances between raw time series are calculated. The resulting distance matrix are as follows.
+
+```{r}
+class <- cbf$Class
+
+# Classification Using Raw Series
+# 1-NN Classifier Using the Raw Data
+
+raw_data_dist <- dist(as.matrix(cbf[,c(-1,-2)]))
+raw_data_dist <- as.matrix(raw_data_dist)
+diag(raw_data_dist) <- 1000
+
+head(round(raw_data_dist,2))
+```
+
+Corresponding prediction matrix and the prediction accuracy obtained using the 1-NN classified are as follows.
+
+```{r}
+raw_data_dist_order <- apply(raw_data_dist, 1, order)
+closest_raw <- raw_data_dist_order[1,]
+predicted_raw <- class[closest_raw]
+
+table(class,predicted_raw)
+acc_raw <- sum(class==predicted_raw)/length(predicted_raw)
+print(paste('Prediction Accuracy:',acc_raw))
+```
+
+Prediction accuracy is 83.33%.
+
+## 1D Fused Lasso
+
+First, distances between representations obtained using the 1D Fused Lasso method are calculated. The resulting distance matrix are as follows.
+
+```{r}
+# Classification Using FusedLasso Representation
+# 1-NN Classifier Using the FusedLasso Representation
+
+lasso_dist <- dist(as.matrix(fitted_lasso))
+lasso_dist <- as.matrix(lasso_dist)
+diag(lasso_dist) <- 1000
+
+head(lasso_dist)
+```
+
+Corresponding prediction matrix and the prediction accuracy obtained using the 1-NN classified are as follows.
+
+```{r}
+lasso_dist_order <- apply(lasso_dist, 1, order)
+closest_lasso <- lasso_dist_order[1,]
+predicted_lasso <- class[closest_lasso]
+
+table(class,predicted_lasso)
+acc_lasso <- sum(class==predicted_lasso)/length(predicted_lasso)
+print(paste('Prediction Accuracy:',acc_lasso))
+```
+
+Prediction accuracy is 93.33%.
+
+## Regression Trees
+
+First, distances between representations obtained using the regression trees are calculated. The resulting distance matrix are as follows.
+
+```{r}
+tree_dist <- dist(as.matrix(fitted_trees))
+tree_dist <- as.matrix(tree_dist)
+diag(tree_dist) <- 1000
+
+head(tree_dist)
+```
+
+Corresponding prediction matrix and the prediction accuracy obtained using the 1-NN classified are as follows.
+
+```{r}
+tree_dist_order <- apply(tree_dist, 1, order)
+closest_tree <- tree_dist_order[1,]
+predicted_tree <- class[closest_tree]
+
+table(class,predicted_tree)
+acc_tree <- sum(class==predicted_tree)/length(predicted_tree)
+print(paste('Prediction Accuracy:',acc_tree))
+```
+
+Prediction accuracy is 90.00%.
+
+## Conclusion
+
+In conclusion, prediction accuracy of the both representations, 1D Fused Lasso and Regression Trees, are better than the prediction accuracy obtained using the raw time series. On the other hand, accuracy of the 1D Fused Lasso Method's accuracy is slightly higher than the accuracy of the Regression Tree Method. However, their accuracy values are very close. Either one of the methods can perform better compared to other method for a given test data. 

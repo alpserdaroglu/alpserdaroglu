@@ -1,0 +1,309 @@
+---
+title: "Homework 1"
+author: "Alp Serdaroğlu"
+date: "11/4/2021"
+output:
+  html_document:
+    code_folding: hide
+    toc: yes
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Preparing the Dataset
+
+```{r message=FALSE, warning=FALSE}
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(scatterplot3d)
+library(plotly)
+```
+
+uWaveGestureLibrary consists of the accelerometer readings from 896 instances. In this assignment, we are going to analyze the accelerometer data from this library. Data set consists of 896 instances. Each instance has the acceleration data in three dimensions and each dimension consists data for 315 time points. Each time series has equal length.
+
+Gestures in the data set are divided into 8 different classes. First objective of this analysis is to visualize the time series which will help to understand the behavior of the different classes. Second, we aim to create time series representations which will be useful in classifying the instances.
+
+## Acceleration
+
+To begin with, raw data is converted to the long format in which each row includes the id of the observation, class information, time index and the acceleration in three dimensions (in three different columns).
+
+```{r}
+# Functions ----
+
+# Function to get the cumulative sum of a data table. i.e Acceleration -> Velocity -> Position.
+# Takes the data in the wide format and returns it in the wide format.
+getCumSum <- function(x){
+  asd <- transpose(x[,c(-1,-2)])
+  def <- transpose(cumsum(asd))
+  fgh <- data.table(cbind(ID = 1:nrow(x), x[,2], def))
+  return(fgh)
+}
+
+# Converts the a data frame in the wide format to the long format pivoting o n the id and class columns.
+WidetoLong <- function(x){
+  long_x <- melt(x, id.vars = c('ID', 'Class'))
+  return(long_x)
+}
+
+# Reading the Data ----
+setwd("C:/Users/alpsr/Desktop/Assignment 1/UWave_TRAIN")
+
+x_raw <- read.table("uWaveGestureLibrary_X_TRAIN.txt", header = F ,
+                    na.strings ="", stringsAsFactors= F)
+y_raw <- read.table("uWaveGestureLibrary_Y_TRAIN.txt", header = F ,
+                    na.strings ="", stringsAsFactors= F)
+z_raw <- read.table("uWaveGestureLibrary_Z_TRAIN.txt", header = F ,
+                    na.strings ="", stringsAsFactors= F)
+
+x_acc <- data.table(cbind(ID = 1:nrow(x_raw),x_raw))
+y_acc <- data.table(cbind(ID = 1:nrow(y_raw),y_raw))
+z_acc <- data.table(cbind(ID = 1:nrow(z_raw),z_raw))
+colnames(x_acc)[2] <- 'Class'
+colnames(y_acc)[2] <- 'Class'
+colnames(z_acc)[2] <- 'Class'
+
+x_acc_long <- WidetoLong(x_acc)
+y_acc_long <- WidetoLong(y_acc)
+z_acc_long <- WidetoLong(z_acc)
+
+x_acc_long[,variable := as.numeric(gsub('V','',variable))-1]
+y_acc_long[,variable := as.numeric(gsub('V','',variable))]
+z_acc_long[,variable := as.numeric(gsub('V','',variable))]
+
+setnames(x_acc_long, "value", "X_Acc")
+setnames(y_acc_long, "value", "Y_Acc")
+setnames(z_acc_long, "value", "Z_Acc")
+
+# ordering the tables just in case
+x_acc_long <- x_acc_long[order(ID, variable),]
+y_acc_long <- y_acc_long[order(ID, variable),]
+z_acc_long <- z_acc_long[order(ID, variable),]
+
+acceleration <- x_acc_long[]
+acceleration[,Y_Acc := y_acc_long[,Y_Acc]]
+acceleration[,Z_Acc := z_acc_long[,Z_Acc]]
+
+head(acceleration)
+```
+
+## Velocity
+
+After creating the acceleration data table, cumulative sums of the acceleration are calculated with respect to the id and class to approximate the velocity in three dimensions. Visualizing the velocity data can provide insights about the data as it is more intuitive than the acceleration information. Note that while approximating the velocity, it is assumed that the initial velocity in all three dimensions equal to zero.
+
+```{r}
+x_vel <- getCumSum(x_acc)
+y_vel <- getCumSum(y_acc)
+z_vel <- getCumSum(z_acc)
+
+x_vel_long <- WidetoLong(x_vel)
+y_vel_long <- WidetoLong(y_vel)
+z_vel_long <- WidetoLong(z_vel)
+
+x_vel_long <- x_vel_long[order(ID, variable),]
+y_vel_long <- y_vel_long[order(ID, variable),]
+z_vel_long <- z_vel_long[order(ID, variable),]
+
+x_vel_long[,variable := as.numeric(gsub('V','',variable))]
+y_vel_long[,variable := as.numeric(gsub('V','',variable))]
+z_vel_long[,variable := as.numeric(gsub('V','',variable))]
+
+setnames(x_vel_long, "value", "X_Vel")
+setnames(y_vel_long, "value", "Y_Vel")
+setnames(z_vel_long, "value", "Z_Vel")
+
+velocity <- x_vel_long[]
+velocity[,Y_Vel := y_vel_long[,Y_Vel]]
+velocity[,Z_Vel := z_vel_long[,Z_Vel]]
+
+head(velocity)
+```
+
+## Position
+
+Finally, cumulative sums of the velocity data in three dimensions are calculated to approximate the position data. This can provide some useful insights as the different classes of gestures follow different position patterns. However, gesture pairs like 3-4, 5-6 and 7-8 will have similar position information as they are basically the same gesture but in the opposite directions. Note that while approximating the position, it is assumed that the initial position in all three dimensions equal to zero.
+
+```{r}
+x_pos <- getCumSum(x_vel)
+y_pos <- getCumSum(y_vel)
+z_pos <- getCumSum(z_vel)
+
+x_pos_long <- WidetoLong(x_pos)
+y_pos_long <- WidetoLong(y_pos)
+z_pos_long <- WidetoLong(z_pos)
+
+x_pos_long <- x_pos_long[order(ID, variable),]
+y_pos_long <- y_pos_long[order(ID, variable),]
+z_pos_long <- z_pos_long[order(ID, variable),]
+
+x_pos_long[,variable := as.numeric(gsub('V','',variable))]
+y_pos_long[,variable := as.numeric(gsub('V','',variable))]
+z_pos_long[,variable := as.numeric(gsub('V','',variable))]
+
+setnames(x_pos_long, "value", "X_Pos")
+setnames(y_pos_long, "value", "Y_Pos")
+setnames(z_pos_long, "value", "Z_Pos")
+
+position <- x_pos_long[]
+position[,Y_Pos := y_pos_long[,Y_Pos]]
+position[,Z_Pos := z_pos_long[,Z_Pos]]
+
+head(position)
+```
+
+
+Finally, acceleration, velocity and position data are combined in a single dataset.
+
+```{r}
+temp <- merge(acceleration, velocity, by = c('ID', 'Class', 'variable'))
+Gesture <- merge(temp, position, by = c('ID', 'Class', 'variable'))
+head(Gesture)
+```
+
+# Visualizing the Classes
+
+First instance of each class is selected to be visualized for convenience. First, 3D scatterplots for different classes are drawn.
+
+## 3D Scatterplots for Position Data
+
+Note that to get a better visualization, axes are changed such as position in the x axis can be displayed in the z axis of the graph and so on.
+
+### Gesture 1
+
+Gesture 1 is a V-shaped gesture. As it can be seen from the plot below, accelerometer follows a V-shape with relatively smaller deviations in the z-axis.
+
+```{r}
+Top1_Gesture <- Gesture[,head(.SD, 315), Class]
+scatterplot3d(x = Top1_Gesture[Class == 1, X_Pos], y = Top1_Gesture[Class == 1, Y_Pos], z = Top1_Gesture[Class == 1, Z_Pos], box = FALSE, main = 'Gesture 1', xlab = 'Velocity X', ylab = 'Velocity Y', zlab = 'Velocity Z')
+```
+
+### Gesture 2
+
+Gesture 2 is a clockwise squared-shaped gesture. The plot below displays a gesture of class 2 but this observation have some noise such that the accelerometer does not exactly follow a square shape. For example, it does not return to the starting point and makes a strange movement near the end of the gesture. However, we can see that the accelerometer follows a rough square shape.
+
+```{r}
+scatterplot3d(x = Top1_Gesture[Class == 2, Y_Pos], y = Top1_Gesture[Class == 2, X_Pos], z = Top1_Gesture[Class == 2, Z_Pos], box = FALSE,
+main = 'Gesture 2', xlab = 'Velocity Y', ylab = 'Velocity X', zlab = 'Velocity Z')
+```
+
+### Gesture 3
+
+Gesture 3 is a straight rightward movement. As expected, observation plotted below displays a movement in the positive y and negative x direction with some deviations in the z-axis.
+
+```{r}
+scatterplot3d(x = Top1_Gesture[Class == 3, X_Pos], y = Top1_Gesture[Class == 3, Z_Pos], z = Top1_Gesture[Class == 3, Y_Pos], box = FALSE, main = 'Gesture 3', xlab = 'Velocity X', ylab = 'Velocity Z', zlab = 'Velocity Y')
+```
+
+
+### Gesture 4
+
+Gesture 4 is a straight leftward movement. The observation plotted below displays a movement in the positive x and positive y direction. As opposed to the Gesture 3, this gesture displays a movement in the opposite x direction.
+
+```{r}
+scatterplot3d(x = Top1_Gesture[Class == 4, X_Pos], y = Top1_Gesture[Class == 4, Z_Pos], z = Top1_Gesture[Class == 4, Y_Pos], box = FALSE,
+main = 'Gesture 4', xlab = 'Velocity X', ylab = 'Velocity Z', zlab = 'Velocity Y')
+
+```
+
+### Gesture 5
+ 
+Gesture 5 is a straight upward movement. The observation plotted below displays a movement in the positive z and positive y direction. There is also some movement in the positive x direction. As expected, the movement is straigt and upwards, although it is not in only one dimension.
+ 
+```{r}
+scatterplot3d(x = Top1_Gesture[Class == 5, X_Pos], y = Top1_Gesture[Class == 5, Z_Pos], z = Top1_Gesture[Class == 5, Y_Pos], box = FALSE,
+main = 'Gesture 5', xlab = 'Velocity X', ylab = 'Velocity Z', zlab = 'Velocity Y')
+```
+
+### Gesture 6
+
+Gesture 5 is a straight downward movement. The observation plotted below displays a movement in the negative z and y direction. There is also some fluctuating movement in the positive x direction which looks like noise. As opposed to the Gesture 5, the movement is in the negative z and y direction which confirms that Gesture 5 and 6 are the same movement with opposite directions.
+
+```{r}
+scatterplot3d(x = Top1_Gesture[Class == 6, X_Pos], y = Top1_Gesture[Class == 6, Z_Pos], z = Top1_Gesture[Class == 6, Y_Pos], box = FALSE,
+main = 'Gesture 6', xlab = 'Velocity X', ylab = 'Velocity Z', zlab = 'Velocity Y')
+```
+
+### Gesture 7
+
+Gesture 7 is a clockwise circular gesture. The observation plotted below first starts with a movement in the positive x, y, and z direction, then starts to revolve towards the negative x direction and then also moves towards in the negative z direction.Similar to Gesture 2, it does not return back to its starting location.
+
+```{r}
+scatterplot3d(x = Top1_Gesture[Class == 7, X_Pos], y = Top1_Gesture[Class == 7, Y_Pos], z = Top1_Gesture[Class == 7, Z_Pos], box = FALSE,
+main = 'Gesture 7', xlab = 'Velocity X', ylab = 'Velocity Y', zlab = 'Velocity Z')
+
+```
+
+### Gesture 8
+
+Gesture 8 is a counter-clockwise circular gesture. The observation plotted below, first starts with a movement in the negative x and y, and positive z direction, then starts to revolve towards the positive x direction and then also moves towards in the negative z direction.Similar to Gesture 2 and 7, it does not return back to its starting location. As expected, the direction of the rotation is opposite to the Gesture 7.
+
+```{r}
+scatterplot3d(x = Top1_Gesture[Class == 8, X_Pos], y = Top1_Gesture[Class == 8, Y_Pos], z = Top1_Gesture[Class == 8, Z_Pos], box = FALSE,
+main = 'Gesture 8', xlab = 'Velocity X', ylab = 'Velocity Y', zlab = 'Velocity Z')
+```
+
+## Velocity over Time
+
+The second type of plot that we will analyze is the magnitude of velocity over time plot. First, the magnitude of the velocity is calculated using the formula, sqrt(x^2 + y^2 + z^2). Then the magnitude of velocity is plotted over time for the first of each class. In the below table, each color represents a different class.
+
+In the plot below, we see that some classes are distinct velocity patterns. On the other hand some pairs of classes are similar to each other but differs from the other classes. First, both Class 1 and Class 2 reaches two peaks, but the Class 1 has higher velocity through the observation. On the other hand, classes 5 and 6 have similar patterns, both reach their maximum velocity in the first half of the observation, as they are basically the same movement but in a different direction. Similarly, classes 3 and 4 reach their maximum velocity in the second half of the observation, and 7 and 8 both display less variance in velocity, have similar patterns but their average magnitude of velocity differs from each other.
+
+```{r}
+ggplot(Top1_Gesture, aes(x = variable, y = sqrt(Y_Vel^2+X_Vel^2+Z_Vel^2), color = as.factor(Class)))+
+  geom_point()+
+  labs(x= 'Time', y = 'Magnitude of Velocity', title = 'Velocity over Time')
+```
+
+# Time Series Representation
+
+Two different representations are considered to determine the representation that will be more beneficial in the time series classification task for this dataset.
+
+## Average Positions
+
+First, representation to be considered is using the average positions of the observations in three dimensions. Average positions are calculated by taking the arithmetic mean of each position time series in three different dimensions. Resulting data set consists of 896 observations each of which has a 3 different average position in x, y and z dimensions. Thus, each row in the resulting data set represent a point in the three dimensional space. The structure of the representation are as follows.
+
+```{r}
+Idea1 <- Gesture[,.(X_Avg = mean(X_Pos), Y_Avg = mean(Y_Pos), Z_Avg = (mean(Z_Pos))), by = .(ID, Class)]
+Idea1[,"X_GrandAvg" := mean(X_Avg), by = .(Class)]
+Idea1[,"Y_GrandAvg" := mean(Y_Avg), by = .(Class)]
+ClassAvg <- Gesture[,.(X_Avg = mean(X_Pos), Y_Avg = mean(Y_Pos)), by = .(Class)]
+head(Idea1)
+```
+
+The following plot shows the average positions of each observation in 3D space. As it can be seen from the plot, this representation can be used to classify the gesture data into different classes. Most of the classes have different average positions from the other classes. Classes 1 and 6 have negative average positions in y and z, but the Class 6 tend to be more negative in the z-axis. Observations from Class 3 differs from other classes by having negative average position in x-axis whereas observations from Class 4 usually have relatively more positive average positions in the x-axis. On the other hand, observations from Class 6 usually have relatively more positive average positions in both y and z-axis. However, the classes 2, 7  and 8 are scattered around the origin and it may be hard to classify the these gestures using this representation. One potential method is to use this representation to classify classes 1, 3, 4, 5, 6 and then use another representation to better classify the classes 2, 7 and 8
+
+```{r}
+fig2 <- plot_ly(Idea1, x = ~X_Avg, y = ~Y_Avg, z = ~Z_Avg, color = ~as.factor(Class))
+fig2 <- add_markers(fig2)
+fig2
+```
+
+Note that the plot above is dynamic, you can rotate the axes, zoom in or out and use the legend to filter desired classes.
+
+## Maximum Velocities and Acceleration
+
+The second representation that will be analyzed is to use the maximum magnitude of velocity and maximum of magnitude of acceleration to represent each observation. First, the magnitude of velocity and acceleration for each time is calculated for each observation (Magnitude of velocity = sqrt(x_vel^2 + y_vel^2 + z_vel^2), Magnitude of Acceleration = sqrt(x_acc^2 + y_acc^2 + z_acc^2)). Then, for each gesture, maximum magnitude of velocity and acceleration is calculated. The resulting data set consists of 896 observations each of which has a maximum acceleration and maximum velocity which can be visualized in a 2D scatterplot.
+
+```{r}
+Idea6 <- Gesture[, .(MaxVelocity = max(sqrt(Y_Vel^2+X_Vel^2+Z_Vel^2)), MaxAcc = max(sqrt(Y_Acc^2+X_Acc^2+Z_Acc^2))), by = .(ID, Class)]
+head(Idea6)
+```
+
+The plot below shows the maximum velocities in the y-axis and maximum acceleration in the x-axis. Using this plot we can see that the maximum velocity information can be used to classify some groups of gestures. For example, classes 2, 7 and 8 distinguish themselves with lower maximum velocities. However, although there is some differentiation in their maximum acceleration values, the overlap between the classes is too high to provide a clear classification. On the other hand, the maximum velocity of Class 1 usually lies above the classes 2, 7 and 8 and below the classes, 3, 4, 5, and 6. Thus, the class can be distinguished from other classes. Finally, remaining classes 3, 4, 5, 6 have relatively higher maximum velocities. They have relatively smaller distinction between each other based on the maximum acceleration data and again the overlap between classes are too great for an accurate classification.
+
+In conclusion, maximum velocity can be used to distinguish certain groups of classes from the others. However, it is not possible to make a classification within these groups using the maximum velocity and acceleration information. On the other hand, there is limited distinction between classes based on the maximum acceleration information. We can say that maximum velocity is more successful as a representation compared to the maximum acceleration. Thus, combining maximum velocity observation with another information from the data set may provide more accurate results in a classification task.
+
+```{r}
+ggplot(Idea6[MaxAcc < 6], aes(x = MaxAcc, y = MaxVelocity, color = as.factor(Class)))+
+  geom_point()+
+  labs(x= 'Maximum Acceleration', y = 'Maximum Velocity', title = 'Maximum Velocity vs. Maximum Acceleration')
+```
+
+Note that couple of extreme observations of maximum acceleration are removed from the plot for a better visualization.
+
+# Conclusion
+
+All in all, first representation which uses average position in three dimensions leads to a better differentiation between the classes. This representation successfully separates (provides a good enough differentiation) five of the classes from other classes. On the other hand, the second representation which uses maximum velocity and maximum acceleration successfully separates only one class from the other classes. Also, the second feature of the second representation, which is maximum acceleration, provides relatively less insight about the classes. Whereas, all three features in the first representation provides information about the class. Thus, in a time series classification task, first representation are expected to provide a more accurate labeling. Therefore, my choice of representation would be the first representation.
